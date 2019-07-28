@@ -47,6 +47,19 @@ struct ModelWriter {
 		return false;
 	}
 
+	static u8 getComponentsCount(const cgltf_attribute& attr) {
+		switch(attr.data->type) {
+			case cgltf_type_scalar: return 1;
+			case cgltf_type_vec2: return 2;
+			case cgltf_type_vec3: return 3;
+			case cgltf_type_vec4: return 4;
+			case cgltf_type_mat2: return 8;
+			case cgltf_type_mat3: return 12;
+			case cgltf_type_mat4: return 16;
+			default: ASSERT(false); return 0;
+		}
+	}
+
 	void writeMeshes(cgltf_data* data) {
 		const PathUtils::FileInfo src_info(src);
 		const u32 mesh_count = (u32)data->meshes_count;
@@ -63,21 +76,27 @@ struct ModelWriter {
 
 			for(u32 i = 0; i < import_mesh.primitives[0].attributes_count; ++i) {
 				const cgltf_attribute& attr = import_mesh.primitives[0].attributes[i];
+				write(getComponentsCount(attr));
+				switch(attr.data->component_type) {
+					case cgltf_component_type_r_32f: write(ffr::AttributeType::FLOAT); break;
+					case cgltf_component_type_r_8u: write(ffr::AttributeType::U8); break;
+					default: ASSERT(false); break;
+				}
 				switch (attr.type) {
 					case cgltf_attribute_type_position: 
-						write(u32(Mesh::AttributeSemantic::POSITION));
+						write(Mesh::AttributeSemantic::POSITION);
 						break;
 					case cgltf_attribute_type_normal: 
-						write(u32(Mesh::AttributeSemantic::NORMAL));
+						write(Mesh::AttributeSemantic::NORMAL);
 						break;
 					case cgltf_attribute_type_texcoord: 
-						write(u32(Mesh::AttributeSemantic::TEXCOORD0));
+						write(Mesh::AttributeSemantic::TEXCOORD0);
 						break;
 					case cgltf_attribute_type_color: 
-						write(u32(Mesh::AttributeSemantic::COLOR0));
+						write(Mesh::AttributeSemantic::COLOR0);
 						break;
 					case cgltf_attribute_type_tangent: 
-						write(u32(Mesh::AttributeSemantic::TANGENT));
+						write(Mesh::AttributeSemantic::TANGENT);
 						break;
 					default: ASSERT(false); break;
 				}
@@ -107,17 +126,7 @@ struct ModelWriter {
 	}
 
 	static u32 getAttributeSize(const cgltf_attribute& attr) {
-		u32 type_size = 0;
-		switch(attr.data->type) {
-			case cgltf_type_scalar: type_size = 1; break;
-			case cgltf_type_vec2: type_size = 2; break;
-			case cgltf_type_vec3: type_size = 3; break;
-			case cgltf_type_vec4: type_size = 4; break;
-			case cgltf_type_mat2: type_size = 8; break;
-			case cgltf_type_mat3: type_size = 12; break;
-			case cgltf_type_mat4: type_size = 16; break;
-			default: ASSERT(false); break;
-		}
+		const u32 cmp_count = getComponentsCount(attr);
 
 		u32 cmp_size = 0;
 		switch (attr.data->component_type) {
@@ -129,7 +138,7 @@ struct ModelWriter {
 			case cgltf_component_type_r_32f: cmp_size = 4; break;
 			default: ASSERT(false); break;
 		}
-		return cmp_size * type_size;
+		return cmp_size * cmp_count;
 	}
 
 	static u32 getVertexSize(const cgltf_mesh& mesh) {
@@ -153,7 +162,7 @@ struct ModelWriter {
 			write(index_size);
 			write(u32(indices->count));
 			const u8* buffer = (const u8*)indices->buffer_view->buffer->data;
-			write(buffer + indices->buffer_view->offset, index_size * indices->count);
+			write(buffer + indices->buffer_view->offset + indices->offset, index_size * indices->count);
 			//aabb.merge(import_mesh.aabb);
 			//radius_squared = maximum(radius_squared, import_mesh.radius_squared);
 		}
