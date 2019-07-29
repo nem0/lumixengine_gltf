@@ -76,12 +76,6 @@ struct ModelWriter {
 
 			for(u32 i = 0; i < import_mesh.primitives[0].attributes_count; ++i) {
 				const cgltf_attribute& attr = import_mesh.primitives[0].attributes[i];
-				write(getComponentsCount(attr));
-				switch(attr.data->component_type) {
-					case cgltf_component_type_r_32f: write(ffr::AttributeType::FLOAT); break;
-					case cgltf_component_type_r_8u: write(ffr::AttributeType::U8); break;
-					default: ASSERT(false); break;
-				}
 				switch (attr.type) {
 					case cgltf_attribute_type_position: 
 						write(Mesh::AttributeSemantic::POSITION);
@@ -100,6 +94,12 @@ struct ModelWriter {
 						break;
 					default: ASSERT(false); break;
 				}
+				switch(attr.data->component_type) {
+					case cgltf_component_type_r_32f: write(ffr::AttributeType::FLOAT); break;
+					case cgltf_component_type_r_8u: write(ffr::AttributeType::U8); break;
+					default: ASSERT(false); break;
+				}
+				write(getComponentsCount(attr));
 			}
 /*			if (import_mesh.is_skinned)
 			{
@@ -150,6 +150,20 @@ struct ModelWriter {
 		return size;
 	}
 	
+	static Matrix getMeshTransform(cgltf_data* data, const cgltf_mesh& mesh) {
+		Matrix res = Matrix::IDENTITY;
+		const cgltf_node* node = nullptr;
+		for (u32 i = 0; i < data->nodes_count; ++i) {
+			if (data->nodes[i].mesh == &mesh) {
+				node = &data->nodes[i];
+				break;
+			}
+		}
+
+		if (node) cgltf_node_transform_world(node, &res.m11);
+		return res;
+	}
+
 	void writeGeometry(cgltf_data* data) {
 		AABB aabb = {{0, 0, 0}, {0, 0, 0}};
 		float radius_squared = 0;
@@ -169,6 +183,7 @@ struct ModelWriter {
 
 		for (u32 i = 0; i < data->meshes_count; ++i) {
 			cgltf_mesh& mesh = data->meshes[i];
+			const Matrix mesh_mtx = getMeshTransform(data, mesh);
 			Array<u8> vb(allocator);
 			const u32 vertex_size = getVertexSize(mesh);
 			vb.resize(int(vertex_size * mesh.primitives[0].attributes[0].data->count));
@@ -186,8 +201,30 @@ struct ModelWriter {
 					tmp += attr.data->stride;
 				}
 
+				if(attr.type == cgltf_attribute_type_position
+					&& attr.data->type == cgltf_type_vec3
+					&& attr.data->component_type == cgltf_component_type_r_32f) 
+				{
+					for(u32 k = 0; k < attr.data->count; ++k) {
+						Vec3* p = (Vec3*)&vb[k * vertex_size + offset];
+						*p = mesh_mtx.transformPoint(*p);
+					}
+				}
+
+				if((attr.type == cgltf_attribute_type_normal || attr.type == cgltf_attribute_type_tangent)
+					&& attr.data->type == cgltf_type_vec3
+					&& attr.data->component_type == cgltf_component_type_r_32f) 
+				{
+					for(u32 k = 0; k < attr.data->count; ++k) {
+						Vec3* p = (Vec3*)&vb[k * vertex_size + offset];
+						*p = mesh_mtx.transformVector(*p);
+					}
+				}
+
 				offset += attr_size;
 			}
+
+
 
 			write((u32)vb.size());
 			write(vb.begin(), vb.byte_size());
