@@ -7,6 +7,7 @@
 #include "editor/asset_compiler.h"
 #include "editor/world_editor.h"
 #include "editor/studio_app.h"
+#include "engine/crc32.h"
 #include "engine/engine.h"
 #include "engine/file_system.h"
 #include "engine/job_system.h"
@@ -71,7 +72,8 @@ struct ModelWriter {
 		auto writeMesh = [&](const cgltf_mesh& import_mesh ) {
 			ASSERT(import_mesh.primitives_count == 1);
 			ASSERT(import_mesh.primitives[0].type == cgltf_primitive_type_triangles);
-			const u32 attribute_count = (u32)import_mesh.primitives[0].attributes_count;
+			const bool is_rigid_animated = isRigidAnimated(data, import_mesh);
+			const u32 attribute_count = (u32)import_mesh.primitives[0].attributes_count + (is_rigid_animated ? 2 : 0);
 			write(attribute_count);
 
 			for(u32 i = 0; i < import_mesh.primitives[0].attributes_count; ++i) {
@@ -101,13 +103,15 @@ struct ModelWriter {
 				}
 				write(getComponentsCount(attr));
 			}
-/*			if (import_mesh.is_skinned)
-			{
-				i32 indices_attr = 6;
-				write(indices_attr);
-				i32 weight_attr = 7;
-				write(weight_attr);
-			}*/
+
+			if (is_rigid_animated) {
+				write(Mesh::AttributeSemantic::INDICES);
+				write(ffr::AttributeType::I16);
+				write((u8)4);
+				write(Mesh::AttributeSemantic::WEIGHTS);
+				write(ffr::AttributeType::FLOAT);
+				write((u8)4);
+			}
 
 			const cgltf_material* material = import_mesh.primitives[0].material;
 			StaticString<MAX_PATH_LENGTH + 128> mat_id(src_info.m_dir, material->name, ".mat");
@@ -141,11 +145,14 @@ struct ModelWriter {
 		return cmp_size * cmp_count;
 	}
 
-	static u32 getVertexSize(const cgltf_mesh& mesh) {
+	static u32 getVertexSize(const cgltf_data* data, const cgltf_mesh& mesh) {
 		u32 size = 0;
 		for (u32 j = 0; j < mesh.primitives[0].attributes_count; ++j) {
 			const cgltf_attribute& attr = mesh.primitives[0].attributes[j];
 			size += getAttributeSize(attr);
+		}
+		if (isRigidAnimated(data, mesh)) {
+			size += sizeof(u16) * 4 + sizeof(Vec4);
 		}
 		return size;
 	}
@@ -162,6 +169,41 @@ struct ModelWriter {
 
 		if (node) cgltf_node_transform_world(node, &res.m11);
 		return res;
+	}
+
+	static const cgltf_node& getNode(const cgltf_data* data, const cgltf_mesh& mesh) {
+		for (u32 i = 0; i < data->nodes_count; ++i) {
+			if(data->nodes[i].mesh == &mesh) return data->nodes[i];
+		}
+		ASSERT(false);
+		return data->nodes[0];
+	}
+
+	static bool isAnimated(const cgltf_data* data, const cgltf_node& node) {
+		for (u32 i = 0; i < data->animations_count; ++i) {
+			const cgltf_animation& anim = data->animations[i];
+			for (u32 j = 0; j < anim.channels_count; ++j) {
+				if (anim.channels[j].target_node == &node) return true;
+			}
+		}
+		return node.parent && isAnimated(data, *node.parent);
+	}
+
+	static bool isRigidAnimated(const cgltf_data* data, const cgltf_mesh& mesh) {
+		for (u32 i = 0; i < mesh.primitives[0].attributes_count; ++i) {
+			if (mesh.primitives[0].attributes[i].type == cgltf_attribute_type_joints) return false;
+		}
+
+		const cgltf_node& node = getNode(data, mesh);
+		return isAnimated(data, node);
+	}
+
+	u32 getIndex(const cgltf_data* data, const cgltf_node& node) {
+		for (u32 i = 0; i < data->nodes_count; ++i) {
+			if (&data->nodes[i] == &node) return i;
+		}
+		ASSERT(false);
+		return 0;
 	}
 
 	void writeGeometry(cgltf_data* data) {
@@ -185,13 +227,13 @@ struct ModelWriter {
 			cgltf_mesh& mesh = data->meshes[i];
 			const Matrix mesh_mtx = getMeshTransform(data, mesh);
 			Array<u8> vb(allocator);
-			const u32 vertex_size = getVertexSize(mesh);
+			const u32 vertex_size = getVertexSize(data, mesh);
 			vb.resize(int(vertex_size * mesh.primitives[0].attributes[0].data->count));
 
 			u32 offset = 0;
 			for (u32 j = 0; j < mesh.primitives[0].attributes_count; ++j) {
 				const cgltf_attribute& attr = mesh.primitives[0].attributes[j];
-				
+
 				const u32 attr_size = getAttributeSize(attr);
 				const u8* tmp = (const u8*)attr.data->buffer_view->buffer->data;
 				tmp += attr.data->buffer_view->offset;
@@ -224,7 +266,16 @@ struct ModelWriter {
 				offset += attr_size;
 			}
 
-
+			if (isRigidAnimated(data, mesh)) {
+				const u32 count = (u32)mesh.primitives[0].attributes[0].data->count;
+				for(u32 j = 0; j < count; ++j) {
+					u16* indices = (u16*)&vb[j * vertex_size + offset];
+					Vec4* weights = (Vec4*)&vb[j * vertex_size + offset + sizeof(u16) * 4];
+					*weights = Vec4(1, 0, 0, 0);
+					indices[0] = getIndex(data, getNode(data, mesh));
+					indices[1] = indices[2] = indices[3] = 0;
+				}
+			}
 
 			write((u32)vb.size());
 			write(vb.begin(), vb.byte_size());
@@ -239,8 +290,41 @@ struct ModelWriter {
 		write(aabb);
 	}
 
-	void writeSkeleton() {
-		write((u32)0);
+	void writeSkeleton(const cgltf_data* data) {
+		write((u32)data->nodes_count);
+
+		for (u32 i = 0; i < data->nodes_count; ++i) {
+			const cgltf_node& node = data->nodes[i];
+			u32 len = (u32)stringLength(node.name);
+			write(len);
+			write(node.name, len);
+
+			if (!node.parent) {
+				write((i32)-1);
+			}
+			else {
+				const i32 idx = i32(node.parent - data->nodes);
+				write(idx);
+			}
+			// TODO
+			/*
+			const ImportMesh* mesh = getAnyMeshFromBone(node, int(&node - bones.begin()));
+			Matrix tr = toLumix(getBindPoseMatrix(mesh, node));
+			tr.normalizeScale();
+
+			Quat q = fixOrientation(tr.getRotation());
+			Vec3 t = fixOrientation(tr.getTranslation());
+			write(t * cfg.mesh_scale);
+			write(q);*/
+
+			Matrix mtx;
+			cgltf_node_transform_world(&node, &mtx.m11);
+
+			const Vec3 t = mtx.getTranslation();
+			const Quat r = mtx.getRotation();
+			write(t);
+			write(r);
+		}
 	}
 
 	void writeLODs(const cgltf_data* data) {
@@ -277,16 +361,101 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		JobSystem::wait(subres_signal);
 	}
 
+	static const cgltf_animation_channel* getAnimChannel(const cgltf_animation& anim
+		, const cgltf_node& node
+		, cgltf_animation_path_type type) 
+	{
+		for (u32 i = 0; i < anim.channels_count; ++i) {
+			if (anim.channels[i].target_node == &node && anim.channels[i].target_path == type) return &anim.channels[i];
+		}
+		return nullptr;
+	}
+
+	static void writeTimes(const cgltf_animation_channel* ch, Ref<OutputMemoryStream> out) {
+		const cgltf_accessor* times = ch->sampler->input;
+		const float* data = (const float*)((const u8*)times->buffer_view->buffer->data + times->buffer_view->offset);
+		const float max = times->max[0];
+		for (u32 i = 0; i < times->count; ++i) {
+			const float t = data[i];
+			const u16 f = u16(0xffFe * (t / max));
+			out->write(f);
+		}
+	}
+
+	static void writeAccessor(const cgltf_accessor* data, Ref<OutputMemoryStream> out) {
+		const u8* mem = (const u8*)data->buffer_view->buffer->data + data->buffer_view->offset + data->offset;
+		out->write(mem, data->stride * data->count);
+	}
+
+	void writeAnimations(const cgltf_data* data, const char* gltf_path) {
+		AssetCompiler& compiler = app.getAssetCompiler();
+		WorldEditor& editor = app.getWorldEditor();
+		FileSystem& fs = editor.getEngine().getFileSystem();
+		IAllocator& allocator = app.getWorldEditor().getAllocator();
+		OutputMemoryStream out(allocator);
+		for (u32 i = 0; i < data->animations_count; ++i) {
+			const cgltf_animation& anim = data->animations[i];
+			out.clear();
+			for (u32 j = 0; j < data->nodes_count; ++j) {
+				const cgltf_node& node = data->nodes[j];
+				const cgltf_animation_channel* pos = getAnimChannel(anim, node, cgltf_animation_path_type_translation);
+				const cgltf_animation_channel* rot = getAnimChannel(anim, node, cgltf_animation_path_type_rotation);
+				if(!pos && !rot) continue;
+
+				const u32 name_hash = crc32(node.name);
+				out.write(name_hash);
+
+				if(pos) {
+					out.write((u32)pos->sampler->input->count);
+					writeTimes(pos, Ref(out));
+					writeAccessor(pos->sampler->output, Ref(out));
+				}
+				else {
+					out.write((u32)0);
+				}
+
+				if(rot) {
+					out.write((u32)rot->sampler->input->count);
+					writeTimes(rot, Ref(out));
+					writeAccessor(rot->sampler->output, Ref(out));
+				}
+				else {
+					out.write((u32)0);
+				}
+			}
+			
+			StaticString<MAX_PATH_LENGTH> res_locator(anim.name, ":", gltf_path);
+			compiler.writeCompiledResource(res_locator, Span<u8>((u8*)out.getData(), (int)out.getPos()));
+		}
+	}
+
 	void writeMaterials(const cgltf_data* data, const char* dir) {
 		WorldEditor& editor = app.getWorldEditor();
 		FileSystem& fs = editor.getEngine().getFileSystem();
+		// TODO do not overwrite existing materials
+		OutputMemoryStream out(editor.getAllocator());
 		for (u32 i = 0; i < data->materials_count; ++i) {
 			const cgltf_material& mat = data->materials[i];
-			OutputMemoryStream out(editor.getAllocator());
+			out.clear();
 			auto writeString = [&out](const char* str){
 				out.write(str, stringLength(str));
 			};
 			writeString("shader \"pipelines/standard.shd\"\n");
+			if (mat.has_pbr_metallic_roughness) {
+				writeString("texture \"");
+				if (mat.pbr_metallic_roughness.base_color_texture.texture) {
+					writeString(mat.pbr_metallic_roughness.base_color_texture.texture->image->uri);
+				}
+				writeString("\"\n");
+
+				writeString("texture \"");
+				if (mat.normal_texture.texture) {
+					writeString(mat.normal_texture.texture->image->uri);
+				}
+				writeString("\"\n");
+
+				// TODO other textures
+			}
 
 			StaticString<MAX_PATH_LENGTH> out_path(fs.getBasePath(), dir, mat.name, ".mat");
 			OS::OutputFile file;
@@ -296,7 +465,6 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			}
 			file.write(out.getData(), out.getPos());
 			file.close();
-
 		}
 	}
 
@@ -343,9 +511,10 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		writer.writeModelHeader();
 		writer.writeMeshes(gltf_data);
 		writer.writeGeometry(gltf_data);
-		writer.writeSkeleton();
+		writer.writeSkeleton(gltf_data);
 		writer.writeLODs(gltf_data);
 		writeMaterials(gltf_data, src_fi.m_dir);
+		writeAnimations(gltf_data, src.c_str());
 
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
 			gltf_data->buffers[i].data = nullptr;
@@ -353,20 +522,8 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 		cgltf_free(gltf_data);
 		
-		const char* output_dir = compiler.getCompiledDir();
-		StaticString<MAX_PATH_LENGTH> out_path(fs.getBasePath(), output_dir, src.getHash(), ".res");
-		OS::OutputFile file;
-		if (!file.open(out_path)) {
-			logError("gltf") << "Could not save " << out_path << "(" << src << ")";
-			return false;
-		}
-
-		const bool written = file.write(writer.out.getData(), writer.out.getPos());
-		file.close();
-
-		if(!written) logError("gltf") << "Could not save " << out_path << "(" << src << ")";
-		
-		return written;
+		Span<u8> compiled_data((u8*)writer.out.getData(), (int)writer.out.getPos());
+		return compiler.writeCompiledResource(src.c_str(), compiled_data);
 	}
 	
 	Meta getMeta(const Path& path) const
