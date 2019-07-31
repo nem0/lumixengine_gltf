@@ -371,13 +371,13 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		return nullptr;
 	}
 
-	static void writeTimes(const cgltf_animation_channel* ch, Ref<OutputMemoryStream> out) {
+	static void writeTimes(const cgltf_animation_channel* ch, Ref<OutputMemoryStream> out, u32 fps) {
 		const cgltf_accessor* times = ch->sampler->input;
-		const float* data = (const float*)((const u8*)times->buffer_view->buffer->data + times->buffer_view->offset);
+		const float* data = (const float*)((const u8*)times->buffer_view->buffer->data + times->buffer_view->offset + times->offset);
 		const float max = times->max[0];
 		for (u32 i = 0; i < times->count; ++i) {
 			const float t = data[i];
-			const u16 f = u16(0xffFe * (t / max));
+			const u16 f = u16(fps * t + 0.5f);
 			out->write(f);
 		}
 	}
@@ -396,6 +396,14 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		for (u32 i = 0; i < data->animations_count; ++i) {
 			const cgltf_animation& anim = data->animations[i];
 			out.clear();
+			Animation::Header header;
+			header.magic = Animation::HEADER_MAGIC;
+			header.version = 3;
+			header.fps = 60;
+			out.write(header);
+			out.write((i32)-1);
+			out.write((u32)anim.samplers[0].input->max[0] * header.fps);
+			out.write((u32)data->nodes_count);
 			for (u32 j = 0; j < data->nodes_count; ++j) {
 				const cgltf_node& node = data->nodes[j];
 				const cgltf_animation_channel* pos = getAnimChannel(anim, node, cgltf_animation_path_type_translation);
@@ -407,7 +415,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 				if(pos) {
 					out.write((u32)pos->sampler->input->count);
-					writeTimes(pos, Ref(out));
+					writeTimes(pos, Ref(out), header.fps);
 					writeAccessor(pos->sampler->output, Ref(out));
 				}
 				else {
@@ -416,7 +424,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 				if(rot) {
 					out.write((u32)rot->sampler->input->count);
-					writeTimes(rot, Ref(out));
+					writeTimes(rot, Ref(out), header.fps);
 					writeAccessor(rot->sampler->output, Ref(out));
 				}
 				else {
