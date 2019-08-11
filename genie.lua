@@ -10,3 +10,5 @@ project "gltf_import"
 	links { "engine" }
 	useLua()
 	defaultConfigurations()
+
+linkPlugin("gltf_import")
