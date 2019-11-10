@@ -8,14 +8,15 @@
 #include "editor/world_editor.h"
 #include "editor/studio_app.h"
 #include "engine/crc32.h"
+#include "engine/crt.h"
 #include "engine/engine.h"
 #include "engine/file_system.h"
 #include "engine/job_system.h"
 #include "engine/log.h"
 #include "engine/lua_wrapper.h"
+#include "engine/math.h"
 #include "engine/path_utils.h"
 #include "renderer/model.h"
-#include <float.h>
 
 using namespace Lumix;
 
@@ -97,8 +98,8 @@ struct ModelWriter {
 					default: ASSERT(false); break;
 				}
 				switch(attr.data->component_type) {
-					case cgltf_component_type_r_32f: write(ffr::AttributeType::FLOAT); break;
-					case cgltf_component_type_r_8u: write(ffr::AttributeType::U8); break;
+					case cgltf_component_type_r_32f: write(gpu::AttributeType::FLOAT); break;
+					case cgltf_component_type_r_8u: write(gpu::AttributeType::U8); break;
 					default: ASSERT(false); break;
 				}
 				write(getComponentsCount(attr));
@@ -106,10 +107,10 @@ struct ModelWriter {
 
 			if (is_rigid_animated) {
 				write(Mesh::AttributeSemantic::INDICES);
-				write(ffr::AttributeType::I16);
+				write(gpu::AttributeType::I16);
 				write((u8)4);
 				write(Mesh::AttributeSemantic::WEIGHTS);
-				write(ffr::AttributeType::FLOAT);
+				write(gpu::AttributeType::FLOAT);
 				write((u8)4);
 			}
 
@@ -119,9 +120,11 @@ struct ModelWriter {
 			write(len);
 			write(mat_id.data, len);
 
-			const u32 name_len = (u32)stringLength(import_mesh.name);
+			const u32 name_len = import_mesh.name ? (u32)stringLength(import_mesh.name) : 0;
 			write(name_len);
-			write(import_mesh.name, name_len);
+			if (name_len) {
+				write(import_mesh.name, name_len);
+			}
 		};
 
 		for (u32 i = 0; i < data->meshes_count; ++i) {
@@ -371,14 +374,14 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		return nullptr;
 	}
 
-	static void writeTimes(const cgltf_animation_channel* ch, Ref<OutputMemoryStream> out, u32 fps) {
+	static void writeTimes(const cgltf_animation_channel* ch, Ref<OutputMemoryStream> out, float anim_len) {
 		const cgltf_accessor* times = ch->sampler->input;
 		const float* data = (const float*)((const u8*)times->buffer_view->buffer->data + times->buffer_view->offset + times->offset);
 		const float max = times->max[0];
 		for (u32 i = 0; i < times->count; ++i) {
 			const float t = data[i];
-			const u16 f = u16(fps * t + 0.5f);
-			out->write(f);
+			u16 tout = u16(clamp(t / anim_len * 0xffFF, 0.f, (float)0xffFF));
+			out->write(tout);
 		}
 	}
 
@@ -396,13 +399,13 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		for (u32 i = 0; i < data->animations_count; ++i) {
 			const cgltf_animation& anim = data->animations[i];
 			out.clear();
+			const float anim_len = anim.samplers[0].input->max[0];
 			Animation::Header header;
 			header.magic = Animation::HEADER_MAGIC;
 			header.version = 3;
-			header.fps = 60;
+			header.length = Time::fromSeconds(anim_len);
 			out.write(header);
 			out.write((i32)-1);
-			out.write((u32)anim.samplers[0].input->max[0] * header.fps);
 			out.write((u32)data->nodes_count);
 			for (u32 j = 0; j < data->nodes_count; ++j) {
 				const cgltf_node& node = data->nodes[j];
@@ -415,7 +418,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 				if(pos) {
 					out.write((u32)pos->sampler->input->count);
-					writeTimes(pos, Ref(out), header.fps);
+					writeTimes(pos, Ref(out), anim_len);
 					writeAccessor(pos->sampler->output, Ref(out));
 				}
 				else {
@@ -424,7 +427,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 				if(rot) {
 					out.write((u32)rot->sampler->input->count);
-					writeTimes(rot, Ref(out), header.fps);
+					writeTimes(rot, Ref(out), anim_len);
 					writeAccessor(rot->sampler->output, Ref(out));
 				}
 				else {
