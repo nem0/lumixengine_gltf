@@ -15,7 +15,7 @@
 #include "engine/log.h"
 #include "engine/lua_wrapper.h"
 #include "engine/math.h"
-#include "engine/path_utils.h"
+#include "engine/path.h"
 #include "renderer/model.h"
 
 using namespace Lumix;
@@ -63,7 +63,7 @@ struct ModelWriter {
 	}
 
 	void writeMeshes(cgltf_data* data) {
-		const PathUtils::FileInfo src_info(src);
+		const PathInfo src_info(src);
 		const u32 mesh_count = (u32)data->meshes_count;
 		write(mesh_count);
 
@@ -502,7 +502,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			buffers.emplace(editor.getAllocator());
 		}
 
-		const PathUtils::FileInfo src_fi(src.c_str());
+		const PathInfo src_fi(src.c_str());
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
 			const char* uri = gltf_data->buffers[i].uri;
 			const StaticString<MAX_PATH_LENGTH> path(src_fi.m_dir, uri);
