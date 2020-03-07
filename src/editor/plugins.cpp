@@ -16,6 +16,7 @@
 #include "engine/lua_wrapper.h"
 #include "engine/math.h"
 #include "engine/path.h"
+#include "engine/universe.h"
 #include "renderer/model.h"
 
 using namespace Lumix;
@@ -627,6 +628,8 @@ struct StudioAppPlugin : StudioApp::IPlugin {
 		const char* exts[] = {"gltf", "glb", nullptr};
 		compiler.addPlugin(*compiler_plugin, exts);
 	}
+
+	bool showGizmo(ComponentUID cmp) override { return false; }
 
 	const char* getName() const override { return "gtlf_import"; }
 
