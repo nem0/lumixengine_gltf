@@ -629,7 +629,7 @@ struct StudioAppPlugin : StudioApp::IPlugin {
 		compiler.addPlugin(*compiler_plugin, exts);
 	}
 
-	bool showGizmo(ComponentUID cmp) override { return false; }
+	bool showGizmo(UniverseView& view, ComponentUID cmp) override { return false; }
 
 	const char* getName() const override { return "gtlf_import"; }
 
