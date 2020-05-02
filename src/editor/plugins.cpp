@@ -437,7 +437,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			}
 			
 			StaticString<MAX_PATH_LENGTH> res_locator(anim.name, ":", gltf_path);
-			compiler.writeCompiledResource(res_locator, Span<u8>((u8*)out.getData(), (int)out.getPos()));
+			compiler.writeCompiledResource(res_locator, Span(out.data(), (u32)out.size()));
 		}
 	}
 
@@ -475,7 +475,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 				logError("gltf") << "Could not create " << out_path;
 				continue;
 			}
-			file.write(out.getData(), out.getPos());
+			file.write(out.data(), out.size());
 			file.close();
 		}
 	}
@@ -485,7 +485,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		FileSystem& fs = editor.getEngine().getFileSystem();
 		AssetCompiler& compiler = app.getAssetCompiler();
 
-		Array<u8> content(editor.getAllocator());
+		OutputMemoryStream content(editor.getAllocator());
 		if (!fs.getContentSync(Path(src), Ref(content))) {
 			logError("gltf") << "Could not load " << src;
 			return false;
@@ -493,12 +493,12 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 		cgltf_data* gltf_data = nullptr;
 		cgltf_options options = {};
-		if (cgltf_parse(&options, content.begin(), content.byte_size(), &gltf_data) != cgltf_result_success) {
+		if (cgltf_parse(&options, content.data(), content.size(), &gltf_data) != cgltf_result_success) {
 			logError("gltf") << "Failed to parse " << src;
 			return false;
 		}
 
-		Array<Array<u8>> buffers(editor.getAllocator());
+		Array<OutputMemoryStream> buffers(editor.getAllocator());
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
 			buffers.emplace(editor.getAllocator());
 		}
@@ -516,7 +516,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
 			ASSERT(!gltf_data->buffers[i].data);
-			gltf_data->buffers[i].data = buffers[i].begin();
+			gltf_data->buffers[i].data = buffers[i].getMutableData();
 		}
 		
 		ModelWriter writer(src.c_str(), editor.getAllocator());
@@ -534,7 +534,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 		cgltf_free(gltf_data);
 		
-		Span<u8> compiled_data((u8*)writer.out.getData(), (int)writer.out.getPos());
+		Span<const u8> compiled_data(writer.out.data(), (u32)writer.out.size());
 		return compiler.writeCompiledResource(src.c_str(), compiled_data);
 	}
 	
@@ -568,7 +568,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			FileSystem& fs = editor.getEngine().getFileSystem();
 			AssetCompiler& compiler = plugin->app.getAssetCompiler();
 			
-			Array<u8> content(editor.getAllocator());
+			OutputMemoryStream content(editor.getAllocator());
 			if (!fs.getContentSync(Path(data->path), Ref(content))) {
 				logError("gltf") << "Could not load " << data->path;
 				LUMIX_DELETE(editor.getAllocator(), data);
@@ -577,7 +577,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 			cgltf_data* gltf_data = nullptr;
 			cgltf_options options = {};
-			if (cgltf_parse(&options, content.begin(), content.byte_size(), &gltf_data) != cgltf_result_success) {
+			if (cgltf_parse(&options, content.data(), content.size(), &gltf_data) != cgltf_result_success) {
 				logError("gltf") << "Failed to parse " << data->path;
 				LUMIX_DELETE(editor.getAllocator(), data);
 				return;
