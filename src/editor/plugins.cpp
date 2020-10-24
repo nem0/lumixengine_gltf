@@ -171,7 +171,7 @@ struct ModelWriter {
 			}
 		}
 
-		if (node) cgltf_node_transform_world(node, &res.m11);
+		if (node) cgltf_node_transform_world(node, &res.columns[0].x);
 		return res;
 	}
 
@@ -322,7 +322,7 @@ struct ModelWriter {
 			write(q);*/
 
 			Matrix mtx;
-			cgltf_node_transform_world(&node, &mtx.m11);
+			cgltf_node_transform_world(&node, &mtx.columns[0].x);
 
 			const Vec3 t = mtx.getTranslation();
 			const Quat r = mtx.getRotation();
