@@ -472,10 +472,14 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			StaticString<MAX_PATH_LENGTH> out_path(fs.getBasePath(), dir, mat.name, ".mat");
 			OS::OutputFile file;
 			if(!file.open(out_path)) {
-				logError("gltf") << "Could not create " << out_path;
+				logError("Could not create ", out_path);
 				continue;
 			}
-			file.write(out.data(), out.size());
+			if (!file.write(out.data(), out.size())) {
+				file.close();
+				logError("Could not write ", out_path);
+				continue;
+			}
 			file.close();
 		}
 	}
@@ -487,14 +491,14 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 		OutputMemoryStream content(editor.getAllocator());
 		if (!fs.getContentSync(Path(src), Ref(content))) {
-			logError("gltf") << "Could not load " << src;
+			logError("Could not load ", src);
 			return false;
 		}
 
 		cgltf_data* gltf_data = nullptr;
 		cgltf_options options = {};
 		if (cgltf_parse(&options, content.data(), content.size(), &gltf_data) != cgltf_result_success) {
-			logError("gltf") << "Failed to parse " << src;
+			logError("Failed to parse ", src);
 			return false;
 		}
 
@@ -508,7 +512,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			const char* uri = gltf_data->buffers[i].uri;
 			const StaticString<MAX_PATH_LENGTH> path(src_fi.m_dir, uri);
 			if (!fs.getContentSync(Path(path), Ref(buffers[i]))) {
-				logError("gltf") << "Could not load " << uri;
+				logError("Could not load ", uri);
 				cgltf_free(gltf_data);
 				return false;
 			}
@@ -570,7 +574,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			
 			OutputMemoryStream content(editor.getAllocator());
 			if (!fs.getContentSync(Path(data->path), Ref(content))) {
-				logError("gltf") << "Could not load " << data->path;
+				logError("Could not load ", data->path);
 				LUMIX_DELETE(editor.getAllocator(), data);
 				return;
 			}
@@ -578,7 +582,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			cgltf_data* gltf_data = nullptr;
 			cgltf_options options = {};
 			if (cgltf_parse(&options, content.data(), content.size(), &gltf_data) != cgltf_result_success) {
-				logError("gltf") << "Failed to parse " << data->path;
+				logError("Failed to parse ", data->path);
 				LUMIX_DELETE(editor.getAllocator(), data);
 				return;
 			}
