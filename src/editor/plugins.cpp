@@ -470,7 +470,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			}
 
 			StaticString<MAX_PATH_LENGTH> out_path(fs.getBasePath(), dir, mat.name, ".mat");
-			OS::OutputFile file;
+			os::OutputFile file;
 			if(!file.open(out_path)) {
 				logError("Could not create ", out_path);
 				continue;
