@@ -116,7 +116,7 @@ struct ModelWriter {
 			}
 
 			const cgltf_material* material = import_mesh.primitives[0].material;
-			StaticString<MAX_PATH_LENGTH + 128> mat_id(src_info.m_dir, material->name, ".mat");
+			StaticString<LUMIX_MAX_PATH + 128> mat_id(src_info.m_dir, material->name, ".mat");
 			const i32 len = stringLength(mat_id.data);
 			write(len);
 			write(mat_id.data, len);
@@ -341,7 +341,7 @@ struct ModelWriter {
 	}
 
 	IAllocator& allocator;
-	StaticString<MAX_PATH_LENGTH> src;
+	StaticString<LUMIX_MAX_PATH> src;
 	OutputMemoryStream out;
 };
 
@@ -362,7 +362,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 	}
 
 	~CompilerPlugin() {
-		JobSystem::wait(subres_signal);
+		jobs::wait(subres_signal);
 	}
 
 	static const cgltf_animation_channel* getAnimChannel(const cgltf_animation& anim
@@ -436,7 +436,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 				}
 			}
 			
-			StaticString<MAX_PATH_LENGTH> res_locator(anim.name, ":", gltf_path);
+			StaticString<LUMIX_MAX_PATH> res_locator(anim.name, ":", gltf_path);
 			compiler.writeCompiledResource(res_locator, Span(out.data(), (u32)out.size()));
 		}
 	}
@@ -469,7 +469,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 				// TODO other textures
 			}
 
-			StaticString<MAX_PATH_LENGTH> out_path(fs.getBasePath(), dir, mat.name, ".mat");
+			StaticString<LUMIX_MAX_PATH> out_path(fs.getBasePath(), dir, mat.name, ".mat");
 			os::OutputFile file;
 			if(!file.open(out_path)) {
 				logError("Could not create ", out_path);
@@ -510,7 +510,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		const PathInfo src_fi(src.c_str());
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
 			const char* uri = gltf_data->buffers[i].uri;
-			const StaticString<MAX_PATH_LENGTH> path(src_fi.m_dir, uri);
+			const StaticString<LUMIX_MAX_PATH> path(src_fi.m_dir, uri);
 			if (!fs.getContentSync(Path(path), Ref(buffers[i]))) {
 				logError("Could not load ", uri);
 				cgltf_free(gltf_data);
@@ -558,14 +558,14 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		const Meta meta = getMeta(Path(path));
 		struct JobData {
 			CompilerPlugin* plugin;
-			StaticString<MAX_PATH_LENGTH> path;
+			StaticString<LUMIX_MAX_PATH> path;
 			Meta meta;
 		};
 		JobData* data = LUMIX_NEW(app.getWorldEditor().getAllocator(), JobData);
 		data->plugin = this;
 		data->path = path;
 		data->meta = meta;
-		JobSystem::runEx(data, [](void* ptr) {
+		jobs::runEx(data, [](void* ptr) {
 			JobData* data = (JobData*)ptr;
 			CompilerPlugin* plugin = data->plugin;
 			WorldEditor& editor = plugin->app.getWorldEditor();
@@ -591,23 +591,23 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 				for (u32 i = 0; i < gltf_data->meshes_count; ++i) {
 					const cgltf_mesh& mesh = gltf_data->meshes[i];
 					char mesh_name[256];
-					StaticString<MAX_PATH_LENGTH> tmp(mesh_name, ":", data->path);
+					StaticString<LUMIX_MAX_PATH> tmp(mesh_name, ":", data->path);
 					compiler.addResource(Model::TYPE, tmp);
 				}
 			}
 
 			for (u32 i = 0; i < gltf_data->animations_count; ++i) {
 				const cgltf_animation& anim = gltf_data->animations[i];
-				StaticString<MAX_PATH_LENGTH> tmp(anim.name, ":", data->path);
+				StaticString<LUMIX_MAX_PATH> tmp(anim.name, ":", data->path);
 				compiler.addResource(Animation::TYPE, tmp);
 			}
 
 			cgltf_free(gltf_data);
 			LUMIX_DELETE(editor.getAllocator(), data);
-		}, &subres_signal, JobSystem::INVALID_HANDLE, 2);		
+		}, &subres_signal, jobs::INVALID_HANDLE, 2);		
 	}
 
-	JobSystem::SignalHandle subres_signal = JobSystem::INVALID_HANDLE;
+	jobs::SignalHandle subres_signal = jobs::INVALID_HANDLE;
 	StudioApp& app;
 	Array<FileSystem::AsyncHandle> in_progress;
 };
