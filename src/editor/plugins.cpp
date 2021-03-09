@@ -375,20 +375,20 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		return nullptr;
 	}
 
-	static void writeTimes(const cgltf_animation_channel* ch, Ref<OutputMemoryStream> out, float anim_len) {
+	static void writeTimes(const cgltf_animation_channel* ch, OutputMemoryStream& out, float anim_len) {
 		const cgltf_accessor* times = ch->sampler->input;
 		const float* data = (const float*)((const u8*)times->buffer_view->buffer->data + times->buffer_view->offset + times->offset);
 		const float max = times->max[0];
 		for (u32 i = 0; i < times->count; ++i) {
 			const float t = data[i];
 			u16 tout = u16(clamp(t / anim_len * 0xffFF, 0.f, (float)0xffFF));
-			out->write(tout);
+			out.write(tout);
 		}
 	}
 
-	static void writeAccessor(const cgltf_accessor* data, Ref<OutputMemoryStream> out) {
+	static void writeAccessor(const cgltf_accessor* data, OutputMemoryStream& out) {
 		const u8* mem = (const u8*)data->buffer_view->buffer->data + data->buffer_view->offset + data->offset;
-		out->write(mem, data->stride * data->count);
+		out.write(mem, data->stride * data->count);
 	}
 
 	void writeAnimations(const cgltf_data* data, const char* gltf_path) {
@@ -419,8 +419,8 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 				if(pos) {
 					out.write((u32)pos->sampler->input->count);
-					writeTimes(pos, Ref(out), anim_len);
-					writeAccessor(pos->sampler->output, Ref(out));
+					writeTimes(pos, out, anim_len);
+					writeAccessor(pos->sampler->output, out);
 				}
 				else {
 					out.write((u32)0);
@@ -428,8 +428,8 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 				if(rot) {
 					out.write((u32)rot->sampler->input->count);
-					writeTimes(rot, Ref(out), anim_len);
-					writeAccessor(rot->sampler->output, Ref(out));
+					writeTimes(rot, out, anim_len);
+					writeAccessor(rot->sampler->output, out);
 				}
 				else {
 					out.write((u32)0);
@@ -490,7 +490,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		AssetCompiler& compiler = app.getAssetCompiler();
 
 		OutputMemoryStream content(editor.getAllocator());
-		if (!fs.getContentSync(Path(src), Ref(content))) {
+		if (!fs.getContentSync(Path(src), content)) {
 			logError("Could not load ", src);
 			return false;
 		}
@@ -511,7 +511,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
 			const char* uri = gltf_data->buffers[i].uri;
 			const StaticString<LUMIX_MAX_PATH> path(src_fi.m_dir, uri);
-			if (!fs.getContentSync(Path(path), Ref(buffers[i]))) {
+			if (!fs.getContentSync(Path(path), buffers[i])) {
 				logError("Could not load ", uri);
 				cgltf_free(gltf_data);
 				return false;
@@ -573,7 +573,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			AssetCompiler& compiler = plugin->app.getAssetCompiler();
 			
 			OutputMemoryStream content(editor.getAllocator());
-			if (!fs.getContentSync(Path(data->path), Ref(content))) {
+			if (!fs.getContentSync(Path(data->path), content)) {
 				logError("Could not load ", data->path);
 				LUMIX_DELETE(editor.getAllocator(), data);
 				return;
