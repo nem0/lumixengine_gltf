@@ -15,6 +15,7 @@
 #include "engine/log.h"
 #include "engine/lua_wrapper.h"
 #include "engine/math.h"
+#include "engine/os.h"
 #include "engine/path.h"
 #include "engine/universe.h"
 #include "renderer/model.h"
