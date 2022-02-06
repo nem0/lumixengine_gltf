@@ -363,7 +363,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 	}
 
 	~CompilerPlugin() {
-		jobs::wait(subres_signal);
+		jobs::wait(&subres_signal);
 	}
 
 	static const cgltf_animation_channel* getAnimChannel(const cgltf_animation& anim
@@ -605,10 +605,10 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 
 			cgltf_free(gltf_data);
 			LUMIX_DELETE(editor.getAllocator(), data);
-		}, &subres_signal, jobs::INVALID_HANDLE, 2);		
+		}, &subres_signal, 2);		
 	}
 
-	jobs::SignalHandle subres_signal = jobs::INVALID_HANDLE;
+	jobs::Signal subres_signal;
 	StudioApp& app;
 	Array<FileSystem::AsyncHandle> in_progress;
 };
