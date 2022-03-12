@@ -7,10 +7,10 @@
 #include "editor/asset_compiler.h"
 #include "editor/world_editor.h"
 #include "editor/studio_app.h"
-#include "engine/crc32.h"
 #include "engine/crt.h"
 #include "engine/engine.h"
 #include "engine/file_system.h"
+#include "engine/hash.h"
 #include "engine/job_system.h"
 #include "engine/log.h"
 #include "engine/lua_wrapper.h"
@@ -415,7 +415,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 				const cgltf_animation_channel* rot = getAnimChannel(anim, node, cgltf_animation_path_type_rotation);
 				if(!pos && !rot) continue;
 
-				const u32 name_hash = crc32(node.name);
+				const StableHash32 name_hash(node.name);
 				out.write(name_hash);
 
 				if(pos) {
