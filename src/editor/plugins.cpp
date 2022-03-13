@@ -404,7 +404,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			const float anim_len = anim.samplers[0].input->max[0];
 			Animation::Header header;
 			header.magic = Animation::HEADER_MAGIC;
-			header.version = 3;
+			header.version = Animation::Version::LAST;
 			header.length = Time::fromSeconds(anim_len);
 			out.write(header);
 			out.write((i32)-1);
