@@ -17,7 +17,7 @@
 #include "engine/math.h"
 #include "engine/os.h"
 #include "engine/path.h"
-#include "engine/universe.h"
+#include "engine/world.h"
 #include "renderer/model.h"
 
 using namespace Lumix;
@@ -634,7 +634,7 @@ struct StudioAppPlugin : StudioApp::IPlugin {
 		compiler.addPlugin(*compiler_plugin, exts);
 	}
 
-	bool showGizmo(UniverseView& view, ComponentUID cmp) override { return false; }
+	bool showGizmo(WorldView& view, ComponentUID cmp) override { return false; }
 
 	const char* getName() const override { return "gtlf_import"; }
 
