@@ -546,10 +546,11 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 	Meta getMeta(const Path& path) const
 	{
 		Meta meta;
-		app.getAssetCompiler().getMeta(path, [&](lua_State* L){
+		if (lua_State* L = app.getAssetCompiler().getMeta(path)) {
 			LuaWrapper::getOptionalField(L, LUA_GLOBALSINDEX, "scale", &meta.scale);
 			LuaWrapper::getOptionalField(L, LUA_GLOBALSINDEX, "split", &meta.split);
-		});
+			lua_close(L);
+		}
 		return meta;
 	}
 
@@ -630,8 +631,8 @@ struct StudioAppPlugin : StudioApp::IPlugin {
 
 		compiler_plugin = LUMIX_NEW(allocator, CompilerPlugin)(app);
 
-		const char* exts[] = {"gltf", "glb", nullptr};
-		compiler.addPlugin(*compiler_plugin, exts);
+		const char* exts[] = {"gltf", "glb"};
+		compiler.addPlugin(*compiler_plugin, Span(exts));
 	}
 
 	bool showGizmo(WorldView& view, ComponentUID cmp) override { return false; }
