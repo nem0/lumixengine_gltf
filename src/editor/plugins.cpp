@@ -65,7 +65,7 @@ struct ModelWriter {
 	}
 
 	void writeMeshes(cgltf_data* data) {
-		const PathInfo src_info(src);
+		StringView dir = Path::getDir(src);
 		const u32 mesh_count = (u32)data->meshes_count;
 		write(mesh_count);
 
@@ -117,7 +117,7 @@ struct ModelWriter {
 			}
 
 			const cgltf_material* material = import_mesh.primitives[0].material;
-			StaticString<LUMIX_MAX_PATH + 128> mat_id(src_info.m_dir, material->name, ".mat");
+			StaticString<LUMIX_MAX_PATH + 128> mat_id(dir, material->name, ".mat");
 			const i32 len = stringLength(mat_id.data);
 			write(len);
 			write(mat_id.data, len);
@@ -437,12 +437,12 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 				}
 			}
 			
-			StaticString<LUMIX_MAX_PATH> res_locator(anim.name, ":", gltf_path);
-			compiler.writeCompiledResource(res_locator, Span(out.data(), (u32)out.size()));
+			Path path(anim.name, ":", gltf_path);
+			compiler.writeCompiledResource(path, Span(out.data(), (u32)out.size()));
 		}
 	}
 
-	void writeMaterials(const cgltf_data* data, const char* dir) {
+	void writeMaterials(const cgltf_data* data, StringView dir) {
 		WorldEditor& editor = app.getWorldEditor();
 		FileSystem& fs = editor.getEngine().getFileSystem();
 		// TODO do not overwrite existing materials
@@ -508,10 +508,10 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			buffers.emplace(editor.getAllocator());
 		}
 
-		const PathInfo src_fi(src.c_str());
+		StringView dir = Path::getDir(src);
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
 			const char* uri = gltf_data->buffers[i].uri;
-			const StaticString<LUMIX_MAX_PATH> path(src_fi.m_dir, uri);
+			const StaticString<LUMIX_MAX_PATH> path(dir, uri);
 			if (!fs.getContentSync(Path(path), buffers[i])) {
 				logError("Could not load ", uri);
 				cgltf_free(gltf_data);
@@ -530,7 +530,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		writer.writeGeometry(gltf_data);
 		writer.writeSkeleton(gltf_data);
 		writer.writeLODs(gltf_data);
-		writeMaterials(gltf_data, src_fi.m_dir);
+		writeMaterials(gltf_data, dir);
 		writeAnimations(gltf_data, src.c_str());
 
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
@@ -540,7 +540,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		cgltf_free(gltf_data);
 		
 		Span<const u8> compiled_data(writer.out.data(), (u32)writer.out.size());
-		return compiler.writeCompiledResource(src.c_str(), compiled_data);
+		return compiler.writeCompiledResource(src, compiled_data);
 	}
 	
 	Meta getMeta(const Path& path) const
@@ -554,13 +554,13 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		return meta;
 	}
 
-	void addSubresources(AssetCompiler& compiler, const char* path) {
+	void addSubresources(AssetCompiler& compiler, const Path& path) {
 		compiler.addResource(Model::TYPE, path);
 		
-		const Meta meta = getMeta(Path(path));
+		const Meta meta = getMeta(path);
 		struct JobData {
 			CompilerPlugin* plugin;
-			StaticString<LUMIX_MAX_PATH> path;
+			Path path;
 			Meta meta;
 		};
 		JobData* data = LUMIX_NEW(app.getWorldEditor().getAllocator(), JobData);
@@ -575,7 +575,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 			AssetCompiler& compiler = plugin->app.getAssetCompiler();
 			
 			OutputMemoryStream content(editor.getAllocator());
-			if (!fs.getContentSync(Path(data->path), content)) {
+			if (!fs.getContentSync(data->path, content)) {
 				logError("Could not load ", data->path);
 				LUMIX_DELETE(editor.getAllocator(), data);
 				return;
@@ -593,14 +593,14 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 				for (u32 i = 0; i < gltf_data->meshes_count; ++i) {
 					const cgltf_mesh& mesh = gltf_data->meshes[i];
 					char mesh_name[256];
-					StaticString<LUMIX_MAX_PATH> tmp(mesh_name, ":", data->path);
+					Path tmp(mesh_name, ":", data->path);
 					compiler.addResource(Model::TYPE, tmp);
 				}
 			}
 
 			for (u32 i = 0; i < gltf_data->animations_count; ++i) {
 				const cgltf_animation& anim = gltf_data->animations[i];
-				StaticString<LUMIX_MAX_PATH> tmp(anim.name, ":", data->path);
+				Path tmp(anim.name, ":", data->path);
 				compiler.addResource(Animation::TYPE, tmp);
 			}
 
