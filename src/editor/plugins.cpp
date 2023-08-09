@@ -117,7 +117,7 @@ struct ModelWriter {
 			}
 
 			const cgltf_material* material = import_mesh.primitives[0].material;
-			StaticString<LUMIX_MAX_PATH + 128> mat_id(dir, material->name, ".mat");
+			StaticString<MAX_PATH + 128> mat_id(dir, material->name, ".mat");
 			const i32 len = stringLength(mat_id.data);
 			write(len);
 			write(mat_id.data, len);
@@ -342,7 +342,7 @@ struct ModelWriter {
 	}
 
 	IAllocator& allocator;
-	StaticString<LUMIX_MAX_PATH> src;
+	StaticString<MAX_PATH> src;
 	OutputMemoryStream out;
 };
 
@@ -470,7 +470,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 				// TODO other textures
 			}
 
-			StaticString<LUMIX_MAX_PATH> out_path(fs.getBasePath(), dir, mat.name, ".mat");
+			StaticString<MAX_PATH> out_path(fs.getBasePath(), dir, mat.name, ".mat");
 			os::OutputFile file;
 			if(!file.open(out_path)) {
 				logError("Could not create ", out_path);
@@ -511,7 +511,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		StringView dir = Path::getDir(src);
 		for (u32 i = 0; i < gltf_data->buffers_count; ++i) {
 			const char* uri = gltf_data->buffers[i].uri;
-			const StaticString<LUMIX_MAX_PATH> path(dir, uri);
+			const StaticString<MAX_PATH> path(dir, uri);
 			if (!fs.getContentSync(Path(path), buffers[i])) {
 				logError("Could not load ", uri);
 				cgltf_free(gltf_data);
