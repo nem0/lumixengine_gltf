@@ -399,46 +399,50 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		IAllocator& allocator = app.getWorldEditor().getAllocator();
 		OutputMemoryStream out(allocator);
 		for (u32 i = 0; i < data->animations_count; ++i) {
-			const cgltf_animation& anim = data->animations[i];
-			out.clear();
-			const float anim_len = anim.samplers[0].input->max[0];
-			Animation::Header header;
-			header.magic = Animation::HEADER_MAGIC;
-			header.version = Animation::Version::LAST;
-			header.length = Time::fromSeconds(anim_len);
-			out.write(header);
-			out.write((i32)-1);
-			out.write((u32)data->nodes_count);
-			for (u32 j = 0; j < data->nodes_count; ++j) {
-				const cgltf_node& node = data->nodes[j];
-				const cgltf_animation_channel* pos = getAnimChannel(anim, node, cgltf_animation_path_type_translation);
-				const cgltf_animation_channel* rot = getAnimChannel(anim, node, cgltf_animation_path_type_rotation);
-				if(!pos && !rot) continue;
+			ASSERT(false);
+			// TODO
+			#if 0
+				const cgltf_animation& anim = data->animations[i];
+				out.clear();
+				const float anim_len = anim.samplers[0].input->max[0];
+				Animation::Header header;
+				header.magic = Animation::HEADER_MAGIC;
+				header.version = Animation::Version::LAST;
+				header.length = Time::fromSeconds(anim_len);
+				out.write(header);
+				out.write((i32)-1);
+				out.write((u32)data->nodes_count);
+				for (u32 j = 0; j < data->nodes_count; ++j) {
+					const cgltf_node& node = data->nodes[j];
+					const cgltf_animation_channel* pos = getAnimChannel(anim, node, cgltf_animation_path_type_translation);
+					const cgltf_animation_channel* rot = getAnimChannel(anim, node, cgltf_animation_path_type_rotation);
+					if(!pos && !rot) continue;
 
-				const StableHash32 name_hash(node.name);
-				out.write(name_hash);
+					const StableHash32 name_hash(node.name);
+					out.write(name_hash);
 
-				if(pos) {
-					out.write((u32)pos->sampler->input->count);
-					writeTimes(pos, out, anim_len);
-					writeAccessor(pos->sampler->output, out);
-				}
-				else {
-					out.write((u32)0);
-				}
+					if(pos) {
+						out.write((u32)pos->sampler->input->count);
+						writeTimes(pos, out, anim_len);
+						writeAccessor(pos->sampler->output, out);
+					}
+					else {
+						out.write((u32)0);
+					}
 
-				if(rot) {
-					out.write((u32)rot->sampler->input->count);
-					writeTimes(rot, out, anim_len);
-					writeAccessor(rot->sampler->output, out);
+					if(rot) {
+						out.write((u32)rot->sampler->input->count);
+						writeTimes(rot, out, anim_len);
+						writeAccessor(rot->sampler->output, out);
+					}
+					else {
+						out.write((u32)0);
+					}
 				}
-				else {
-					out.write((u32)0);
-				}
-			}
 			
-			Path path(anim.name, ":", gltf_path);
-			compiler.writeCompiledResource(path, Span(out.data(), (u32)out.size()));
+				Path path(anim.name, ":", gltf_path);
+				compiler.writeCompiledResource(path, Span(out.data(), (u32)out.size()));
+			#endif
 		}
 	}
 
