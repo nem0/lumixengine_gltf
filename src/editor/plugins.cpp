@@ -83,19 +83,19 @@ struct ModelWriter {
 				const cgltf_attribute& attr = import_mesh.primitives[0].attributes[i];
 				switch (attr.type) {
 					case cgltf_attribute_type_position: 
-						write(Mesh::AttributeSemantic::POSITION);
+						write(AttributeSemantic::POSITION);
 						break;
 					case cgltf_attribute_type_normal: 
-						write(Mesh::AttributeSemantic::NORMAL);
+						write(AttributeSemantic::NORMAL);
 						break;
 					case cgltf_attribute_type_texcoord: 
-						write(Mesh::AttributeSemantic::TEXCOORD0);
+						write(AttributeSemantic::TEXCOORD0);
 						break;
 					case cgltf_attribute_type_color: 
-						write(Mesh::AttributeSemantic::COLOR0);
+						write(AttributeSemantic::COLOR0);
 						break;
 					case cgltf_attribute_type_tangent: 
-						write(Mesh::AttributeSemantic::TANGENT);
+						write(AttributeSemantic::TANGENT);
 						break;
 					default: ASSERT(false); break;
 				}
@@ -108,10 +108,10 @@ struct ModelWriter {
 			}
 
 			if (is_rigid_animated) {
-				write(Mesh::AttributeSemantic::INDICES);
+				write(AttributeSemantic::INDICES);
 				write(gpu::AttributeType::I16);
 				write((u8)4);
-				write(Mesh::AttributeSemantic::WEIGHTS);
+				write(AttributeSemantic::WEIGHTS);
 				write(gpu::AttributeType::FLOAT);
 				write((u8)4);
 			}
