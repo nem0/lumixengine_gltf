@@ -8,7 +8,6 @@ project "gltf_import"
 	}
 	defines { "BUILDING_GLTF_IMPORT" }
 	links { "engine" }
-	useLua()
 	defaultConfigurations()
 
 linkPlugin("gltf_import")

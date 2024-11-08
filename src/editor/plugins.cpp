@@ -1,8 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
-#define CGLTF_IMPLEMENTATION
-#include "cgltf.h"
-#undef _CRT_SECURE_NO_WARNINGS
-
 #include "animation/animation.h"
 #include "core/crt.h"
 #include "core/hash.h"
@@ -11,15 +6,20 @@
 #include "core/math.h"
 #include "core/os.h"
 #include "core/path.h"
+#include "core/tokenizer.h"
 #include "editor/asset_compiler.h"
-#include "editor/world_editor.h"
 #include "editor/studio_app.h"
+#include "editor/world_editor.h"
 #include "engine/component_uid.h"
 #include "engine/engine.h"
 #include "engine/file_system.h"
-#include "engine/lua_wrapper.h"
 #include "engine/world.h"
 #include "renderer/model.h"
+
+#define _CRT_SECURE_NO_WARNINGS
+#define CGLTF_IMPLEMENTATION
+#include "cgltf.h"
+#undef _CRT_SECURE_NO_WARNINGS
 
 using namespace Lumix;
 
@@ -551,10 +551,14 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 	Meta getMeta(const Path& path) const
 	{
 		Meta meta;
-		if (lua_State* L = app.getAssetCompiler().getMeta(path)) {
-			LuaWrapper::getOptionalField(L, LUA_GLOBALSINDEX, "scale", &meta.scale);
-			LuaWrapper::getOptionalField(L, LUA_GLOBALSINDEX, "split", &meta.split);
-			lua_close(L);
+		OutputMemoryStream blob(app.getAllocator());
+		if (app.getAssetCompiler().getMeta(path, blob)) {
+			StringView sv((const char*)blob.data(), (u32)blob.size());
+			const ParseItemDesc descs[] = {
+				{"scale", &meta.scale},
+				{"split", &meta.split},
+			};
+			parse(sv, path.c_str(), descs);
 		}
 		return meta;
 	}
@@ -572,7 +576,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		data->plugin = this;
 		data->path = path;
 		data->meta = meta;
-		jobs::runEx(data, [](void* ptr) {
+		jobs::run(data, [](void* ptr) {
 			JobData* data = (JobData*)ptr;
 			CompilerPlugin* plugin = data->plugin;
 			WorldEditor& editor = plugin->app.getWorldEditor();
@@ -614,7 +618,7 @@ struct CompilerPlugin : AssetCompiler::IPlugin {
 		}, &subres_signal, 2);		
 	}
 
-	jobs::Signal subres_signal;
+	jobs::Counter subres_signal;
 	StudioApp& app;
 	Array<FileSystem::AsyncHandle> in_progress;
 };
