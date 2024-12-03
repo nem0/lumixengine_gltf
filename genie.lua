@@ -1,5 +1,4 @@
-project "gltf_import"
-	libType()
+if plugin "gltf_import" then
 	files { 
 		"src/**.c",
 		"src/**.cpp",
@@ -8,6 +7,4 @@ project "gltf_import"
 	}
 	defines { "BUILDING_GLTF_IMPORT" }
 	links { "engine" }
-	defaultConfigurations()
-
-linkPlugin("gltf_import")
+end
