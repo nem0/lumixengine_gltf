@@ -22,6 +22,7 @@
 #include "engine/world.h"
 #include "renderer/editor/fbx_importer.h"
 #include "renderer/editor/model_importer.h"
+#include "renderer/editor/model_meta.h"
 #include "renderer/editor/world_viewer.h"
 #include "renderer/model.h"
 #include "renderer/render_module.h"
@@ -132,7 +133,15 @@ struct GLTFImporter : ModelImporter {
 		return nullptr;
 	}
 
-	bool parse(const Path& src, ReadFlags flags, const ImportConfig* cfg) override {
+	bool parseSimple(const Path& src) override {
+		return parse(src, nullptr);
+	}
+
+	bool parse(const Path& src, const ModelMeta& meta) override {
+		return parse(src, &meta);
+	}
+
+	bool parse(const Path& src, const ModelMeta* meta) {
 		PROFILE_FUNCTION();
 		FileSystem& fs = m_app.getEngine().getFileSystem();
 
@@ -303,7 +312,7 @@ struct GLTFImporter : ModelImporter {
 			anim.length = m_src_data->animations[i].samplers[0].input->max[0];
 		}
 
-		if (cfg) postprocess(*cfg, src);
+		postprocess(*meta, src);
 
 		return true;
 	}
@@ -344,7 +353,7 @@ struct GLTFImporter : ModelImporter {
 		return res;
 	}
 
-	void postprocess(const ImportConfig& cfg, const Path& path) {
+	void postprocess(const ModelMeta& meta, const Path& path) {
 		u32 bone_remap[1024];
 		for (i32 i = 0; i < m_bones.size(); ++i) {
 			bone_remap[m_bones[i].id - 1] = i;
@@ -372,7 +381,7 @@ struct GLTFImporter : ModelImporter {
 			
 			const Matrix mesh_mtx = getMeshTransform(m_src_data, src_mesh);
 			
-			mesh.vertex_data.resize(mesh.vertex_size * src_mesh.primitives[0].attributes[0].data->count);
+			mesh.vertex_buffer.resize(mesh.vertex_size * src_mesh.primitives[0].attributes[0].data->count);
 			for (u32 j = 0; j < src_mesh.primitives[0].attributes_count; ++j) {
 				u32 attr_offset = 0;
 				for (AttributeDesc& desc : mesh.attributes) {
@@ -383,7 +392,7 @@ struct GLTFImporter : ModelImporter {
 				const cgltf_attribute& attr = src_mesh.primitives[0].attributes[j];
 				u32 attr_size = getAttributeSize(attr);
 				const u8* src_data = (const u8*)attr.data->buffer_view->buffer->data + attr.data->buffer_view->offset + attr.data->offset;
-				u8* vb = mesh.vertex_data.getMutableData();
+				u8* vb = mesh.vertex_buffer.getMutableData();
 				
 				if (attr.type == cgltf_attribute_type_joints) {
 					if (attr.data->component_type == cgltf_component_type_r_8u && attr.data->type == cgltf_type_vec4) {
@@ -439,7 +448,7 @@ struct GLTFImporter : ModelImporter {
 			}
 		}
 		
-		postprocessCommon(cfg);
+		postprocessCommon(meta);
 	}
 
 	static bool hasAttribute(const cgltf_mesh& mesh, cgltf_attribute_type type) {
@@ -599,12 +608,12 @@ struct GLTFPlugin : AssetBrowser::IPlugin, AssetCompiler::IPlugin {
 
 	bool compile(const Path& src) override {
 		GLTFImporter writer(m_app);
-		ModelImporter::ImportConfig cfg;
-		cfg.skeleton = src;
-		if (!writer.parse(src, ModelImporter::ReadFlags::NONE, &cfg)) return false;
+		ModelMeta meta(m_app.getAllocator());
+		meta.skeleton = src;
+		if (!writer.parse(src, &meta)) return false;
 
-		bool result = writer.write(src, cfg, ModelImporter::WriteFlags::NONE);
-		result = result && writer.writeMaterials(src, cfg, false);
+		bool result = writer.write(src, meta);
+		result = result && writer.writeMaterials(src, meta, false);
 		return result;
 	}
 	
