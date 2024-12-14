@@ -195,86 +195,93 @@ struct GLTFImporter : ModelImporter {
 		StringView src_dir = Path::getDir(src);
 
 		for (u32 mesh_index = 0; mesh_index < m_src_data->meshes_count; ++mesh_index) {
-			ImportMesh& mesh = m_meshes.emplace(m_allocator);
-			ImportGeometry& geom = m_geometries.emplace(m_allocator);
-			mesh.mesh_index = mesh_index;
-			mesh.geometry_idx = mesh_index;
-			geom.material_index = m_materials.size();
 			const cgltf_mesh& src_mesh = m_src_data->meshes[mesh_index];
+
+			for (u32 primitive_index = 0; primitive_index < src_mesh.primitives_count; ++primitive_index) {
+				ImportMesh& mesh = m_meshes.emplace(m_allocator);
+				ImportGeometry& geom = m_geometries.emplace(m_allocator);
+				mesh.mesh_index = mesh_index;
+				mesh.geometry_idx = m_geometries.size() - 1;
+				geom.material_index = m_materials.size();
+				geom.submesh = primitive_index;
 			
-			ASSERT(src_mesh.primitives_count == 1); // TODO
-			ASSERT(src_mesh.primitives[0].type == cgltf_primitive_type_triangles);
+				const cgltf_primitive& primitive = src_mesh.primitives[primitive_index];
+				ASSERT(primitive.type == cgltf_primitive_type_triangles);
 
-			// TODO bake vertex ao, rigid animated
-			// TODO make sure position is first and is Vec3
-			// TODO makes sure normal & tangent are in proper format
+				// TODO bake vertex ao, rigid animated
+				// TODO make sure position is first and is Vec3
+				// TODO makes sure normal & tangent are in proper format
 
-			geom.attributes.push({
-				.semantic = AttributeSemantic::POSITION,
-				.type = gpu::AttributeType::FLOAT,
-				.num_components = 3
-			});
+				geom.attributes.push({
+					.semantic = AttributeSemantic::POSITION,
+					.type = gpu::AttributeType::FLOAT,
+					.num_components = 3
+				});
 
-			// TODO move to postprocess
-			for (u32 i = 0; i < src_mesh.primitives[0].attributes_count; ++i) {
-				AttributeDesc desc;
-				const cgltf_attribute& attr = src_mesh.primitives[0].attributes[i];
-				if (attr.type == cgltf_attribute_type_position) continue;
-				switch (attr.type) {
-					case cgltf_attribute_type_normal: desc.semantic = AttributeSemantic::NORMAL; break;
-					case cgltf_attribute_type_texcoord: desc.semantic = AttributeSemantic::TEXCOORD0; break;
-					case cgltf_attribute_type_color: desc.semantic = AttributeSemantic::COLOR0; break;
-					case cgltf_attribute_type_tangent: desc.semantic = AttributeSemantic::TANGENT; break;
-					case cgltf_attribute_type_weights: desc.semantic = AttributeSemantic::WEIGHTS; break;
-					case cgltf_attribute_type_joints: desc.semantic = AttributeSemantic::JOINTS; break;
-					case cgltf_attribute_type_position:
-					case cgltf_attribute_type_invalid: ASSERT(false); break;
+				// TODO move to postprocess
+				for (u32 i = 0; i < primitive.attributes_count; ++i) {
+					AttributeDesc desc;
+					const cgltf_attribute& attr = primitive.attributes[i];
+					if (attr.type == cgltf_attribute_type_position) continue;
+					switch (attr.type) {
+						case cgltf_attribute_type_normal: desc.semantic = AttributeSemantic::NORMAL; break;
+						case cgltf_attribute_type_texcoord: desc.semantic = AttributeSemantic::TEXCOORD0; break;
+						case cgltf_attribute_type_color: desc.semantic = AttributeSemantic::COLOR0; break;
+						case cgltf_attribute_type_tangent: desc.semantic = AttributeSemantic::TANGENT; break;
+						case cgltf_attribute_type_weights: desc.semantic = AttributeSemantic::WEIGHTS; break;
+						case cgltf_attribute_type_joints: desc.semantic = AttributeSemantic::JOINTS; break;
+						case cgltf_attribute_type_position:
+						case cgltf_attribute_type_invalid: ASSERT(false); break;
+					}
+
+					switch(attr.data->component_type) {
+						case cgltf_component_type_r_32f: desc.type = gpu::AttributeType::FLOAT; break;
+						case cgltf_component_type_r_8u: desc.type = gpu::AttributeType::U8; break;
+						case cgltf_component_type_r_8: desc.type = gpu::AttributeType::I8; break;
+						case cgltf_component_type_r_16: desc.type = gpu::AttributeType::I16; break;
+						case cgltf_component_type_r_16u: desc.type = gpu::AttributeType::U16; break;
+						default: ASSERT(false); break;
+					}
+					desc.num_components = getComponentsCount(attr);
+					if (desc.semantic == AttributeSemantic::JOINTS) {
+						desc.type = gpu::AttributeType::U16;
+						desc.num_components = 4;
+					}
+					geom.attributes.push(desc);
 				}
 
-				switch(attr.data->component_type) {
-					case cgltf_component_type_r_32f: desc.type = gpu::AttributeType::FLOAT; break;
-					case cgltf_component_type_r_8u: desc.type = gpu::AttributeType::U8; break;
-					case cgltf_component_type_r_8: desc.type = gpu::AttributeType::I8; break;
-					case cgltf_component_type_r_16: desc.type = gpu::AttributeType::I16; break;
-					case cgltf_component_type_r_16u: desc.type = gpu::AttributeType::U16; break;
-					default: ASSERT(false); break;
+				geom.vertex_size = 0;
+				for (const AttributeDesc& attr : geom.attributes) {
+					geom.vertex_size += gpu::getSize(attr.type) * attr.num_components;
 				}
-				desc.num_components = getComponentsCount(attr);
-				if (desc.semantic == AttributeSemantic::JOINTS) {
-					desc.type = gpu::AttributeType::U16;
-					desc.num_components = 4;
-				}
-				geom.attributes.push(desc);
-			}
+				mesh.name = src_mesh.name ? src_mesh.name : "default";
 
-			geom.vertex_size = 0;
-			for (const AttributeDesc& attr : geom.attributes) {
-				geom.vertex_size += gpu::getSize(attr.type) * attr.num_components;
-			}
-			mesh.name = src_mesh.name ? src_mesh.name : "default";
+				ImportMaterial& material = m_materials.emplace(m_allocator);
+				const cgltf_material* src_mat = primitive.material;
+				for (ImportTexture& t : material.textures) t.import = false;
+				if (src_mat) {
+					material.name = src_mat->name;
 
-			ImportMaterial& material = m_materials.emplace(m_allocator);
-			const cgltf_material* src_mat = src_mesh.primitives[0].material;
-			if (src_mat) {
-				material.name = src_mat->name;
+					if (src_mat->has_pbr_metallic_roughness) {
+						const cgltf_pbr_metallic_roughness& pbr = primitive.material->pbr_metallic_roughness;
+						material.diffuse_color = Vec3(pbr.base_color_factor[0], pbr.base_color_factor[1], pbr.base_color_factor[2]);
+						if (pbr.base_color_texture.texture) {
+							material.textures[ImportTexture::DIFFUSE].import = true;
+							material.textures[ImportTexture::DIFFUSE].src = src_dir;
+							material.textures[ImportTexture::DIFFUSE].src.append(pbr.base_color_texture.texture->image->uri);
+						}
+					}
 
-				if (src_mat->has_pbr_metallic_roughness) {
-					const cgltf_pbr_metallic_roughness& pbr = src_mesh.primitives[0].material->pbr_metallic_roughness;
-					material.diffuse_color = Vec3(pbr.base_color_factor[0], pbr.base_color_factor[1], pbr.base_color_factor[2]);
-					if (pbr.base_color_texture.texture) {
-						material.textures[ImportTexture::DIFFUSE].src = src_dir;
-						material.textures[ImportTexture::DIFFUSE].src.append(pbr.base_color_texture.texture->image->uri);
+					if (src_mat->normal_texture.texture) {
+						material.textures[ImportTexture::NORMAL].import = true;
+						material.textures[ImportTexture::NORMAL].src = src_dir;
+						material.textures[ImportTexture::NORMAL].src.append(src_mat->normal_texture.texture->image->uri);
 					}
 				}
-
-				if (src_mat->normal_texture.texture) {
-					material.textures[ImportTexture::NORMAL].src = src_dir;
-					material.textures[ImportTexture::NORMAL].src.append(src_mat->normal_texture.texture->image->uri);
+				else {
+					logError(src, ": Mesh without material - ", mesh.name);
+					return false;
 				}
-			}
-			else {
-				logError(src, ": Mesh without material - ", mesh.name);
-				return false;
 			}
 		}
 
@@ -364,7 +371,8 @@ struct GLTFImporter : ModelImporter {
 		for (ImportMesh& mesh : m_meshes) {
 			ImportGeometry& geom = m_geometries[mesh.geometry_idx];
 			const cgltf_mesh& src_mesh = m_src_data->meshes[mesh.mesh_index];
-			const cgltf_accessor* indices = src_mesh.primitives[0].indices;
+			const cgltf_primitive& primitive = src_mesh.primitives[geom.submesh];
+			const cgltf_accessor* indices = primitive.indices;
 			// TODO handle indices == nullptr
 			switch (indices->component_type) {
 				case cgltf_component_type_r_16u: geom.index_size = 2; break;
@@ -384,15 +392,15 @@ struct GLTFImporter : ModelImporter {
 			
 			const Matrix mesh_mtx = getMeshTransform(m_src_data, src_mesh);
 			
-			geom.vertex_buffer.resize(geom.vertex_size * src_mesh.primitives[0].attributes[0].data->count);
-			for (u32 j = 0; j < src_mesh.primitives[0].attributes_count; ++j) {
+			geom.vertex_buffer.resize(geom.vertex_size * primitive.attributes[0].data->count);
+			for (u32 j = 0; j < primitive.attributes_count; ++j) {
 				u32 attr_offset = 0;
 				for (AttributeDesc& desc : geom.attributes) {
-					if (desc.semantic == toLumix(src_mesh.primitives[0].attributes[j].type)) break;
+					if (desc.semantic == toLumix(primitive.attributes[j].type)) break;
 					attr_offset += gpu::getSize(desc.type) * desc.num_components;
 				}
 
-				const cgltf_attribute& attr = src_mesh.primitives[0].attributes[j];
+				const cgltf_attribute& attr = primitive.attributes[j];
 				u32 attr_size = getAttributeSize(attr);
 				const u8* src_data = (const u8*)attr.data->buffer_view->buffer->data + attr.data->buffer_view->offset + attr.data->offset;
 				u8* vb = geom.vertex_buffer.getMutableData();
