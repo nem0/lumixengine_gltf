@@ -196,8 +196,10 @@ struct GLTFImporter : ModelImporter {
 
 		for (u32 mesh_index = 0; mesh_index < m_src_data->meshes_count; ++mesh_index) {
 			ImportMesh& mesh = m_meshes.emplace(m_allocator);
+			ImportGeometry& geom = m_geometries.emplace(m_allocator);
 			mesh.mesh_index = mesh_index;
-			mesh.material_index = mesh_index;
+			mesh.geometry_idx = mesh_index;
+			geom.material_index = m_materials.size();
 			const cgltf_mesh& src_mesh = m_src_data->meshes[mesh_index];
 			
 			ASSERT(src_mesh.primitives_count == 1); // TODO
@@ -207,7 +209,7 @@ struct GLTFImporter : ModelImporter {
 			// TODO make sure position is first and is Vec3
 			// TODO makes sure normal & tangent are in proper format
 
-			mesh.attributes.push({
+			geom.attributes.push({
 				.semantic = AttributeSemantic::POSITION,
 				.type = gpu::AttributeType::FLOAT,
 				.num_components = 3
@@ -242,12 +244,12 @@ struct GLTFImporter : ModelImporter {
 					desc.type = gpu::AttributeType::U16;
 					desc.num_components = 4;
 				}
-				mesh.attributes.push(desc);
+				geom.attributes.push(desc);
 			}
 
-			mesh.vertex_size = 0;
-			for (const AttributeDesc& attr : mesh.attributes) {
-				mesh.vertex_size += gpu::getSize(attr.type) * attr.num_components;
+			geom.vertex_size = 0;
+			for (const AttributeDesc& attr : geom.attributes) {
+				geom.vertex_size += gpu::getSize(attr.type) * attr.num_components;
 			}
 			mesh.name = src_mesh.name ? src_mesh.name : "default";
 
@@ -360,31 +362,32 @@ struct GLTFImporter : ModelImporter {
 		}
 		
 		for (ImportMesh& mesh : m_meshes) {
+			ImportGeometry& geom = m_geometries[mesh.geometry_idx];
 			const cgltf_mesh& src_mesh = m_src_data->meshes[mesh.mesh_index];
 			const cgltf_accessor* indices = src_mesh.primitives[0].indices;
 			// TODO handle indices == nullptr
 			switch (indices->component_type) {
-				case cgltf_component_type_r_16u: mesh.index_size = 2; break;
-				case cgltf_component_type_r_32u: mesh.index_size = 4; break;
+				case cgltf_component_type_r_16u: geom.index_size = 2; break;
+				case cgltf_component_type_r_32u: geom.index_size = 4; break;
 				default: ASSERT(false); break;
 			}
-			mesh.indices.resize((u32)indices->count);
+			geom.indices.resize((u32)indices->count);
 			// TODO are all these offsets in bytes?
 			const u8* ptr = (const u8*)indices->buffer_view->buffer->data + indices->buffer_view->offset + indices->offset;
 			for (u32 i = 0; i < indices->count; ++i) {
-				switch (mesh.index_size) {
-					case 2: mesh.indices[i] = *(u16*)(ptr + i * 2); break;
-					case 4: mesh.indices[i] = *(u16*)(ptr + i * 4); break;
+				switch (geom.index_size) {
+					case 2: geom.indices[i] = *(u16*)(ptr + i * 2); break;
+					case 4: geom.indices[i] = *(u16*)(ptr + i * 4); break;
 					default: ASSERT(false); break;
 				}
 			}
 			
 			const Matrix mesh_mtx = getMeshTransform(m_src_data, src_mesh);
 			
-			mesh.vertex_buffer.resize(mesh.vertex_size * src_mesh.primitives[0].attributes[0].data->count);
+			geom.vertex_buffer.resize(geom.vertex_size * src_mesh.primitives[0].attributes[0].data->count);
 			for (u32 j = 0; j < src_mesh.primitives[0].attributes_count; ++j) {
 				u32 attr_offset = 0;
-				for (AttributeDesc& desc : mesh.attributes) {
+				for (AttributeDesc& desc : geom.attributes) {
 					if (desc.semantic == toLumix(src_mesh.primitives[0].attributes[j].type)) break;
 					attr_offset += gpu::getSize(desc.type) * desc.num_components;
 				}
@@ -392,7 +395,7 @@ struct GLTFImporter : ModelImporter {
 				const cgltf_attribute& attr = src_mesh.primitives[0].attributes[j];
 				u32 attr_size = getAttributeSize(attr);
 				const u8* src_data = (const u8*)attr.data->buffer_view->buffer->data + attr.data->buffer_view->offset + attr.data->offset;
-				u8* vb = mesh.vertex_buffer.getMutableData();
+				u8* vb = geom.vertex_buffer.getMutableData();
 				
 				if (attr.type == cgltf_attribute_type_joints) {
 					if (attr.data->component_type == cgltf_component_type_r_8u && attr.data->type == cgltf_type_vec4) {
@@ -401,7 +404,7 @@ struct GLTFImporter : ModelImporter {
 							u16 joints_u16[4];
 							memcpy(joints_u8, src_data, attr_size);
 							for(u32 i = 0; i < 4; ++i) joints_u16[i] = bone_remap[joints_u8[i]];
-							memcpy(&vb[k * mesh.vertex_size + attr_offset], joints_u16, sizeof(joints_u16));
+							memcpy(&vb[k * geom.vertex_size + attr_offset], joints_u16, sizeof(joints_u16));
 							src_data += attr.data->stride;
 						}
 						attr_size = sizeof(u16) * 4;
@@ -411,7 +414,7 @@ struct GLTFImporter : ModelImporter {
 							u16 joints[4];
 							memcpy(joints, src_data, attr_size);
 							for(u32 i = 0; i < 4; ++i) joints[i] = bone_remap[joints[i]];
-							memcpy(&vb[k * mesh.vertex_size + attr_offset], joints, sizeof(joints));
+							memcpy(&vb[k * geom.vertex_size + attr_offset], joints, sizeof(joints));
 							src_data += attr.data->stride;
 						}
 					}
@@ -421,7 +424,7 @@ struct GLTFImporter : ModelImporter {
 				}
 				else {
 					for (u32 k = 0; k < attr.data->count; ++k) {
-						memcpy(&vb[k * mesh.vertex_size + attr_offset], src_data, attr_size);
+						memcpy(&vb[k * geom.vertex_size + attr_offset], src_data, attr_size);
 						src_data += attr.data->stride;
 					}
 				}
@@ -431,7 +434,7 @@ struct GLTFImporter : ModelImporter {
 					&& attr.data->component_type == cgltf_component_type_r_32f) 
 				{
 					for(u32 k = 0; k < attr.data->count; ++k) {
-						Vec3* p = (Vec3*)&vb[k * mesh.vertex_size + attr_offset];
+						Vec3* p = (Vec3*)&vb[k * geom.vertex_size + attr_offset];
 						*p = mesh_mtx.transformPoint(*p);
 					}
 				}
@@ -441,7 +444,7 @@ struct GLTFImporter : ModelImporter {
 					&& attr.data->component_type == cgltf_component_type_r_32f) 
 				{
 					for(u32 k = 0; k < attr.data->count; ++k) {
-						Vec3* p = (Vec3*)&vb[k * mesh.vertex_size + attr_offset];
+						Vec3* p = (Vec3*)&vb[k * geom.vertex_size + attr_offset];
 						*p = mesh_mtx.transformVector(*p);
 					}
 				}
