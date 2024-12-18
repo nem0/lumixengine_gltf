@@ -23,6 +23,7 @@
 #include "renderer/editor/fbx_importer.h"
 #include "renderer/editor/model_importer.h"
 #include "renderer/editor/model_meta.h"
+#include "renderer/editor/render_plugins.h"
 #include "renderer/editor/world_viewer.h"
 #include "renderer/model.h"
 #include "renderer/render_module.h"
@@ -546,34 +547,6 @@ struct GLTFImporter : ModelImporter {
 
 
 struct GLTFPlugin : AssetBrowser::IPlugin, AssetCompiler::IPlugin {
-	struct EditorWindow : AssetEditorWindow, SimpleUndoRedo {
-		EditorWindow(const Path& path, GLTFPlugin& plugin)
-			: AssetEditorWindow(plugin.m_app)
-			, SimpleUndoRedo(plugin.m_app.getAllocator())
-			, m_path(path)
-			, m_plugin(plugin)
-			, m_viewer(plugin.m_app)
-		{
-			StudioApp& app = plugin.m_app;
-			Engine& engine = app.getEngine();
-			m_resource = engine.getResourceManager().load<Model>(path);
-
-			auto* render_module = static_cast<RenderModule*>(m_viewer.m_world->getModule(MODEL_INSTANCE_TYPE));
-			render_module->setModelInstancePath(*m_viewer.m_mesh, m_resource->getPath());
-		}
-
-		void deserialize(InputMemoryStream& blob) override { ASSERT(false); }
-		void serialize(OutputMemoryStream& blob) override { ASSERT(false); }
-		void windowGUI() override {}
-		const Path& getPath() override { return m_path; }
-		const char* getName() const override { return "gltf"; }
-
-		Path m_path;
-		GLTFPlugin& m_plugin;
-		WorldViewer m_viewer;
-		Model* m_resource;
-	};
-
 	struct Meta {
 		float scale = 1;
 		bool split = false;
@@ -597,9 +570,7 @@ struct GLTFPlugin : AssetBrowser::IPlugin, AssetCompiler::IPlugin {
 	}
 
 	void openEditor(const Path& path) override {
-		IAllocator& allocator = m_app.getAllocator();
-		UniquePtr<EditorWindow> win = UniquePtr<EditorWindow>::create(allocator, path, *this);
-		m_app.getAssetBrowser().addWindow(win.move());
+		createModelEditor(path, m_app);
 	}
 
 	const char* getLabel() const override {
