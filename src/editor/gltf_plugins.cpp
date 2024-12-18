@@ -192,8 +192,6 @@ struct GLTFImporter : ModelImporter {
 			}
 		}
 
-		StringView src_dir = Path::getDir(src);
-
 		for (u32 mesh_index = 0; mesh_index < m_src_data->meshes_count; ++mesh_index) {
 			const cgltf_mesh& src_mesh = m_src_data->meshes[mesh_index];
 
@@ -258,7 +256,6 @@ struct GLTFImporter : ModelImporter {
 
 				ImportMaterial& material = m_materials.emplace(m_allocator);
 				const cgltf_material* src_mat = primitive.material;
-				for (ImportTexture& t : material.textures) t.import = false;
 				if (src_mat) {
 					material.name = src_mat->name;
 
@@ -266,16 +263,12 @@ struct GLTFImporter : ModelImporter {
 						const cgltf_pbr_metallic_roughness& pbr = primitive.material->pbr_metallic_roughness;
 						material.diffuse_color = Vec3(pbr.base_color_factor[0], pbr.base_color_factor[1], pbr.base_color_factor[2]);
 						if (pbr.base_color_texture.texture) {
-							material.textures[ImportTexture::DIFFUSE].import = true;
-							material.textures[ImportTexture::DIFFUSE].src = src_dir;
-							material.textures[ImportTexture::DIFFUSE].src.append(pbr.base_color_texture.texture->image->uri);
+							material.textures[ImportTexture::DIFFUSE].path = pbr.base_color_texture.texture->image->uri;
 						}
 					}
 
 					if (src_mat->normal_texture.texture) {
-						material.textures[ImportTexture::NORMAL].import = true;
-						material.textures[ImportTexture::NORMAL].src = src_dir;
-						material.textures[ImportTexture::NORMAL].src.append(src_mat->normal_texture.texture->image->uri);
+						material.textures[ImportTexture::NORMAL].path = src_mat->normal_texture.texture->image->uri;
 					}
 				}
 				else {
@@ -459,7 +452,7 @@ struct GLTFImporter : ModelImporter {
 			}
 		}
 		
-		postprocessCommon(meta);
+		postprocessCommon(meta, path);
 	}
 
 	static bool hasAttribute(const cgltf_mesh& mesh, cgltf_attribute_type type) {
