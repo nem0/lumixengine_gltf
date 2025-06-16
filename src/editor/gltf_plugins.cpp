@@ -202,7 +202,15 @@ struct GLTFImporter : ModelImporter {
 				geom.submesh = primitive_index;
 			
 				const cgltf_primitive& primitive = src_mesh.primitives[primitive_index];
-				ASSERT(primitive.type == cgltf_primitive_type_triangles);
+				if (primitive.has_draco_mesh_compression) {
+					logError(src, ": draco mesh compression not supported.");
+					return false;
+				}
+
+				if (primitive.type != cgltf_primitive_type_triangles) {
+					logError(src, ": primitive type not supported.");
+					return false;
+				}
 
 				// TODO bake vertex ao, rigid animated
 				// TODO make sure position is first and is Vec3
@@ -262,12 +270,12 @@ struct GLTFImporter : ModelImporter {
 					if (src_mat->has_pbr_metallic_roughness) {
 						const cgltf_pbr_metallic_roughness& pbr = primitive.material->pbr_metallic_roughness;
 						material.diffuse_color = Vec3(pbr.base_color_factor[0], pbr.base_color_factor[1], pbr.base_color_factor[2]);
-						if (pbr.base_color_texture.texture) {
+						if (pbr.base_color_texture.texture && !pbr.base_color_texture.texture->has_basisu) {
 							material.textures[ImportTexture::DIFFUSE].path = pbr.base_color_texture.texture->image->uri;
 						}
 					}
 
-					if (src_mat->normal_texture.texture) {
+					if (src_mat->normal_texture.texture && !src_mat->normal_texture.texture->has_basisu) {
 						material.textures[ImportTexture::NORMAL].path = src_mat->normal_texture.texture->image->uri;
 					}
 				}
@@ -374,6 +382,7 @@ struct GLTFImporter : ModelImporter {
 				const cgltf_size num_indices = cgltf_accessor_unpack_indices(indices, nullptr, 0, 0);
 				geom.indices.resize((u32)num_indices);
 				switch (indices->component_type) {
+					case cgltf_component_type_r_8u: geom.index_size = 2; break;
 					case cgltf_component_type_r_16u: geom.index_size = 2; break;
 					case cgltf_component_type_r_32u: geom.index_size = 4; break;
 					default: ASSERT(false); break;
