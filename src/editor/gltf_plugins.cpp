@@ -1,32 +1,18 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "animation/animation.h"
-#include "core/crt.h"
-#include "core/hash.h"
 #include "core/job_system.h"
 #include "core/log.h"
 #include "core/math.h"
-#include "core/os.h"
-#include "core/path.h"
 #include "core/profiler.h"
-#include "core/tokenizer.h"
 #include "editor/asset_browser.h"
 #include "editor/asset_compiler.h"
-#include "editor/editor_asset.h"
 #include "editor/studio_app.h"
-#include "editor/utils.h"
-#include "editor/world_editor.h"
 #include "engine/component_uid.h"
 #include "engine/engine.h"
-#include "engine/file_system.h"
-#include "engine/resource_manager.h"
-#include "engine/world.h"
-#include "renderer/editor/fbx_importer.h"
 #include "renderer/editor/model_importer.h"
 #include "renderer/editor/model_meta.h"
 #include "renderer/editor/render_plugins.h"
-#include "renderer/editor/world_viewer.h"
 #include "renderer/model.h"
-#include "renderer/render_module.h"
 
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
@@ -167,7 +153,18 @@ struct GLTFImporter : ModelImporter {
 		for (u32 i = 0; i < m_src_data->buffers_count; ++i) {
 			const char* uri = m_src_data->buffers[i].uri;
 			
-			if (strncmp(uri, "data:", 5) == 0) {
+			if (!uri) {
+				if (!m_src_data->bin) {
+					logError(src, ": failed to load data.");
+					return false;
+				}
+				if (m_src_data->bin_size < m_src_data->buffers[i].size) {
+					logError(src, ": data too short.");
+					return false;
+				}
+				m_src_data->buffers[i].data = (void*)m_src_data->bin;
+			}
+			else if (strncmp(uri, "data:", 5) == 0) {
 				const char* comma = strchr(uri, ',');
 				if (comma && comma - uri >= 7 && strncmp(comma - 7, ";base64", 7) == 0) {
 					cgltf_result res = cgltf_load_buffer_base64(&options, m_src_data->buffers[i].size, comma + 1, &m_src_data->buffers[i].data);
@@ -229,6 +226,8 @@ struct GLTFImporter : ModelImporter {
 						case cgltf_attribute_type_tangent: desc.semantic = AttributeSemantic::TANGENT; break;
 						case cgltf_attribute_type_weights: desc.semantic = AttributeSemantic::WEIGHTS; break;
 						case cgltf_attribute_type_joints: desc.semantic = AttributeSemantic::JOINTS; break;
+						case cgltf_attribute_type_max_enum:
+						case cgltf_attribute_type_custom:
 						case cgltf_attribute_type_position:
 						case cgltf_attribute_type_invalid: ASSERT(false); break;
 					}
@@ -241,7 +240,7 @@ struct GLTFImporter : ModelImporter {
 						case cgltf_component_type_r_16u: desc.type = gpu::AttributeType::U16; break;
 						default: ASSERT(false); break;
 					}
-					desc.num_components = getComponentsCount(attr);
+					desc.num_components = (u32)cgltf_num_components(attr.data->type);
 					if (desc.semantic == AttributeSemantic::JOINTS) {
 						desc.type = gpu::AttributeType::U16;
 						desc.num_components = 4;
@@ -359,28 +358,40 @@ struct GLTFImporter : ModelImporter {
 	void postprocess(const ModelMeta& meta, const Path& path) {
 		u32 bone_remap[1024];
 		for (i32 i = 0; i < m_bones.size(); ++i) {
+			ASSERT(m_bones[i].id > 0);
+			ASSERT(m_bones[i].id - 1 < lengthOf(bone_remap));
 			bone_remap[m_bones[i].id - 1] = i;
+			bone_remap[i] = i;
 		}
-		
+
 		for (ImportMesh& mesh : m_meshes) {
 			ImportGeometry& geom = m_geometries[mesh.geometry_idx];
 			const cgltf_mesh& src_mesh = m_src_data->meshes[mesh.mesh_index];
 			const cgltf_primitive& primitive = src_mesh.primitives[geom.submesh];
 			const cgltf_accessor* indices = primitive.indices;
-			// TODO handle indices == nullptr
-			switch (indices->component_type) {
-				case cgltf_component_type_r_16u: geom.index_size = 2; break;
-				case cgltf_component_type_r_32u: geom.index_size = 4; break;
-				default: ASSERT(false); break;
-			}
-			geom.indices.resize((u32)indices->count);
-			// TODO are all these offsets in bytes?
-			const u8* ptr = (const u8*)indices->buffer_view->buffer->data + indices->buffer_view->offset + indices->offset;
-			for (u32 i = 0; i < indices->count; ++i) {
-				switch (geom.index_size) {
-					case 2: geom.indices[i] = *(u16*)(ptr + i * 2); break;
-					case 4: geom.indices[i] = *(u16*)(ptr + i * 4); break;
+
+			if (indices) {
+				const cgltf_size num_indices = cgltf_accessor_unpack_indices(indices, nullptr, 0, 0);
+				geom.indices.resize((u32)num_indices);
+				switch (indices->component_type) {
+					case cgltf_component_type_r_16u: geom.index_size = 2; break;
+					case cgltf_component_type_r_32u: geom.index_size = 4; break;
 					default: ASSERT(false); break;
+				}
+				
+				geom.indices.resize((u32)indices->count);
+				cgltf_accessor_unpack_indices(indices, geom.indices.data(), sizeof(geom.indices[0]), geom.indices.size());
+			}
+			else if (primitive.attributes_count > 0) {
+				geom.indices.resize((u32)primitive.attributes[0].data->count);
+				if (primitive.attributes[0].data->count < 0xffFF) {
+					geom.index_size = 2;
+				}
+				else {
+					geom.index_size = 4;
+				}
+				for (u32 i = 0, n = geom.indices.size(); i < n; ++i) {
+					geom.indices[i] = i;
 				}
 			}
 			
@@ -463,32 +474,9 @@ struct GLTFImporter : ModelImporter {
 		return false;
 	}
 
-	static u8 getComponentsCount(const cgltf_attribute& attr) {
-		switch(attr.data->type) {
-			case cgltf_type_scalar: return 1;
-			case cgltf_type_vec2: return 2;
-			case cgltf_type_vec3: return 3;
-			case cgltf_type_vec4: return 4;
-			case cgltf_type_mat2: return 8;
-			case cgltf_type_mat3: return 12;
-			case cgltf_type_mat4: return 16;
-			default: ASSERT(false); return 0;
-		}
-	}
-
 	static u32 getAttributeSize(const cgltf_attribute& attr) {
-		const u32 cmp_count = getComponentsCount(attr);
-
-		u32 cmp_size = 0;
-		switch (attr.data->component_type) {
-			case cgltf_component_type_r_8u:
-			case cgltf_component_type_r_8: cmp_size = 1; break;
-			case cgltf_component_type_r_16:
-			case cgltf_component_type_r_16u: cmp_size = 2; break;
-			case cgltf_component_type_r_32u:
-			case cgltf_component_type_r_32f: cmp_size = 4; break;
-			default: ASSERT(false); break;
-		}
+		const u32 cmp_count = (u32)cgltf_num_components(attr.data->type);
+		const u32 cmp_size = (u32)cgltf_component_size(attr.data->component_type);
 		return cmp_size * cmp_count;
 	}
 
@@ -547,11 +535,6 @@ struct GLTFImporter : ModelImporter {
 
 
 struct GLTFPlugin : AssetBrowser::IPlugin, AssetCompiler::IPlugin {
-	struct Meta {
-		float scale = 1;
-		bool split = false;
-	};
-
 	GLTFPlugin(StudioApp& app) 
 		: m_app(app) 
 	{
@@ -584,7 +567,7 @@ struct GLTFPlugin : AssetBrowser::IPlugin, AssetCompiler::IPlugin {
 	bool compile(const Path& src) override {
 		GLTFImporter writer(m_app);
 		ModelMeta meta(m_app.getAllocator());
-		meta.skeleton = src;
+		meta.load(src, m_app);
 		if (!writer.parse(src, &meta)) return false;
 
 		bool result = writer.write(src, meta);
@@ -592,45 +575,30 @@ struct GLTFPlugin : AssetBrowser::IPlugin, AssetCompiler::IPlugin {
 		return result;
 	}
 	
-	Meta getMeta(const Path& path) const
-	{
-		Meta meta;
-		OutputMemoryStream blob(m_app.getAllocator());
-		if (m_app.getAssetCompiler().getMeta(path, blob)) {
-			StringView sv((const char*)blob.data(), (u32)blob.size());
-			const ParseItemDesc descs[] = {
-				{"scale", &meta.scale},
-				{"split", &meta.split},
-			};
-			parse(sv, path.c_str(), descs);
-		}
-		return meta;
-	}
-
 	void addSubresources(AssetCompiler& compiler, const Path& path) {
 		compiler.addResource(Model::TYPE, path);
 		
-		const Meta meta = getMeta(path);
 		struct JobData {
+			JobData(IAllocator& allocator) : meta(allocator) {}
 			GLTFPlugin* plugin;
 			Path path;
-			Meta meta;
+			ModelMeta meta;
 		};
-		JobData* data = LUMIX_NEW(m_app.getWorldEditor().getAllocator(), JobData);
+		JobData* data = LUMIX_NEW(m_app.getAllocator(), JobData)(m_app.getAllocator());
 		data->plugin = this;
 		data->path = path;
-		data->meta = meta;
+		data->meta.load(path, m_app);
 		jobs::run(data, [](void* ptr) {
 			JobData* data = (JobData*)ptr;
 			GLTFPlugin* plugin = data->plugin;
-			WorldEditor& editor = plugin->m_app.getWorldEditor();
-			FileSystem& fs = editor.getEngine().getFileSystem();
+			IAllocator& allocator = plugin->m_app.getAllocator();
+			FileSystem& fs = plugin->m_app.getEngine().getFileSystem();
 			AssetCompiler& compiler = plugin->m_app.getAssetCompiler();
 			
-			OutputMemoryStream content(editor.getAllocator());
+			OutputMemoryStream content(allocator);
 			if (!fs.getContentSync(data->path, content)) {
 				logError("Could not load ", data->path);
-				LUMIX_DELETE(editor.getAllocator(), data);
+				LUMIX_DELETE(allocator, data);
 				return;
 			}
 
@@ -638,7 +606,7 @@ struct GLTFPlugin : AssetBrowser::IPlugin, AssetCompiler::IPlugin {
 			cgltf_options options = {};
 			if (cgltf_parse(&options, content.data(), content.size(), &gltf_data) != cgltf_result_success) {
 				logError("Failed to parse ", data->path);
-				LUMIX_DELETE(editor.getAllocator(), data);
+				LUMIX_DELETE(allocator, data);
 				return;
 			}
 
@@ -658,7 +626,7 @@ struct GLTFPlugin : AssetBrowser::IPlugin, AssetCompiler::IPlugin {
 			}
 
 			cgltf_free(gltf_data);
-			LUMIX_DELETE(editor.getAllocator(), data);
+			LUMIX_DELETE(allocator, data);
 		}, &m_subres_signal, 2);		
 	}
 
@@ -671,14 +639,14 @@ struct StudioAppPlugin : StudioApp::IPlugin {
 	StudioAppPlugin(StudioApp& app) : app(app) {}
 
 	~StudioAppPlugin() {
-		IAllocator& allocator = app.getWorldEditor().getAllocator();
+		IAllocator& allocator = app.getAllocator();
 		AssetCompiler& compiler = app.getAssetCompiler();
 		compiler.removePlugin(*plugin);
 		LUMIX_DELETE(allocator, plugin);
 	}
 
 	void init() override {
-		IAllocator& allocator = app.getWorldEditor().getAllocator();
+		IAllocator& allocator = app.getAllocator();
 		AssetCompiler& compiler = app.getAssetCompiler();
 
 		plugin = LUMIX_NEW(allocator, GLTFPlugin)(app);
@@ -699,6 +667,6 @@ struct StudioAppPlugin : StudioApp::IPlugin {
 
 
 LUMIX_STUDIO_ENTRY(gltf_import) {
-	IAllocator& allocator = app.getWorldEditor().getAllocator();
+	IAllocator& allocator = app.getAllocator();
 	return LUMIX_NEW(allocator, StudioAppPlugin)(app);
 }
